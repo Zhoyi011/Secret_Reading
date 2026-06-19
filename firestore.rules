@@ -45,8 +45,8 @@ service cloud.firestore {
       // Users can create their own profile during registration
       // If the email is bootstrap admin, they can become owner, otherwise they must start as reader
       allow create: if isSignedIn() && request.auth.uid == userId && (
-        (request.auth.token.email == 'zhoyilee@gmail.com' && request.resource.data.role == 'owner') ||
-        (request.auth.token.email != 'zhoyilee@gmail.com' && request.resource.data.role == 'reader')
+        (request.resource.data.email == 'zhoyilee@gmail.com' && request.resource.data.role == 'owner') ||
+        (request.resource.data.email != 'zhoyilee@gmail.com' && request.resource.data.role == 'reader')
       );
 
       // Only the owner can update any user's role

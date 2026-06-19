@@ -67,13 +67,23 @@ export default function Register({ onNavigate, onSuccess }: RegisterProps) {
       onSuccess();
     } catch (err: any) {
       console.error("Registration failed:", err);
-      let errMsg = "注册失败，请稍后重试";
+      let errMsg = err.message || "注册失败，请稍后重试";
       if (err.code === 'auth/email-already-in-use') {
         errMsg = "此电子邮箱已被注册";
       } else if (err.code === 'auth/weak-password') {
         errMsg = "密码强度不足，请至少设置 6 位字符";
       } else if (err.code === 'auth/invalid-email') {
         errMsg = "电子邮箱格式错误";
+      } else {
+        // Parse custom firestore or other thrown messages
+        try {
+          const parsed = JSON.parse(err.message);
+          if (parsed.error) {
+            errMsg = `账号登录成功，但个人资料初始化失败：${parsed.error}`;
+          }
+        } catch {
+          // Keep err.message
+        }
       }
       setError(errMsg);
     } finally {
