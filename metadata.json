@@ -1,0 +1,6 @@
+{
+  "name": "Private Reading Platform",
+  "description": "A secure, private reading platform featuring reader/author/owner roles, markdown editing and rendering, post liking, and draft autosaving.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

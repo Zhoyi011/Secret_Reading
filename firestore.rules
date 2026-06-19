@@ -1,0 +1,97 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function getUser(userId) {
+      return get(/databases/$(database)/documents/users/$(userId));
+    }
+
+    // A user is owner if their user document role is 'owner'
+    // or if their authenticated email is the bootstrap owner 'zhoyilee@gmail.com'
+    function isOwner() {
+      return isSignedIn() && (
+        request.auth.token.email == 'zhoyilee@gmail.com' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         getUser(request.auth.uid).data.role == 'owner')
+      );
+    }
+
+    // Check if user is author or owner
+    function isAuthorOrOwner() {
+      return isSignedIn() && (
+        request.auth.token.email == 'zhoyilee@gmail.com' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
+          getUser(request.auth.uid).data.role == 'author' ||
+          getUser(request.auth.uid).data.role == 'owner'
+        ))
+      );
+    }
+
+    match /users/{userId} {
+      // Anyone signed in can read a user profile (for display names, roles, etc.)
+      allow read: if isSignedIn();
+
+      // Users can create their own profile during registration
+      // If the email is bootstrap admin, they can become owner, otherwise they must start as reader
+      allow create: if isSignedIn() && request.auth.uid == userId && (
+        (request.auth.token.email == 'zhoyilee@gmail.com' && request.resource.data.role == 'owner') ||
+        (request.auth.token.email != 'zhoyilee@gmail.com' && request.resource.data.role == 'reader')
+      );
+
+      // Only the owner can update any user's role
+      // Users themselves can update other profile details, but NOT their role
+      allow update: if isOwner() || (
+        isSignedIn() && request.auth.uid == userId &&
+        request.resource.data.role == resource.data.role
+      );
+
+      allow delete: if isOwner();
+    }
+
+    match /posts/{postId} {
+      // Anyone signed in can read published articles
+      // Drafts can only be read by their author or the owner
+      allow read: if isSignedIn() && (
+        resource.data.status == 'published' ||
+        resource.data.authorId == request.auth.uid ||
+        isOwner()
+      );
+
+      // Only authors or owners can create posts
+      allow create: if isAuthorOrOwner() && request.resource.data.authorId == request.auth.uid;
+
+      // Authors can update their own posts. Anyone signed in can update "likes" and "likers"
+      // to perform liking operations (with validation checks)
+      allow update: if isSignedIn() && (
+        // Option A: Author or Owner updates the entire document (content, status, etc.)
+        (
+          (resource.data.authorId == request.auth.uid || isOwner()) && 
+          request.resource.data.authorId == resource.data.authorId
+        ) ||
+        // Option B: A reader likes/unlikes the document, changing ONLY likes and likers
+        (
+          request.resource.data.title == resource.data.title &&
+          request.resource.data.content == resource.data.content &&
+          request.resource.data.authorId == resource.data.authorId &&
+          request.resource.data.status == resource.data.status &&
+          // Validate that the likes count correlates to the likers list
+          request.resource.data.likes == request.resource.data.likers.size()
+        )
+      );
+
+      // Only the owner can delete any post. Authors can also delete their own draft/posts
+      allow delete: if isOwner() || (isSignedIn() && resource.data.authorId == request.auth.uid);
+    }
+  }
+}

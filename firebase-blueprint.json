@@ -1,0 +1,104 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User profiles with roles and registration info",
+      "type": "object",
+      "properties": {
+        "firebaseUid": {
+          "type": "string",
+          "description": "The unique Firebase Authentication UID of the user"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "User email address"
+        },
+        "username": {
+          "type": "string",
+          "description": "Display username"
+        },
+        "birthday": {
+          "type": "string",
+          "description": "User birthday"
+        },
+        "avatar": {
+          "type": "string",
+          "description": "Cloudinary image URL or standard avatar"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["reader", "author", "owner"],
+          "description": "The authorization role of the user"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        }
+      },
+      "required": ["firebaseUid", "email", "username", "role", "createdAt"]
+    },
+    "Post": {
+      "title": "Article Post",
+      "description": "Articles / posts written by authors or owners",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Title of the post"
+        },
+        "content": {
+          "type": "string",
+          "description": "Markdown body content"
+        },
+        "authorId": {
+          "type": "string",
+          "description": "The Firebase UID of the author"
+        },
+        "authorName": {
+          "type": "string",
+          "description": "The display name of the author"
+        },
+        "images": {
+          "type": "array",
+          "description": "List of Cloudinary image URLs"
+        },
+        "likes": {
+          "type": "integer",
+          "description": "Like counter"
+        },
+        "likers": {
+          "type": "array",
+          "description": "Array of Firebase UIDs who liked this post"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["draft", "published"],
+          "description": "The publishing state of the article"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp"
+        }
+      },
+      "required": ["title", "content", "authorId", "authorName", "status", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "User profiles indexed by their Firebase UID"
+    },
+    "posts/{postId}": {
+      "schema": "Post",
+      "description": "Articles and drafts"
+    }
+  }
+}
