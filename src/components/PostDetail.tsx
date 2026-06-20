@@ -4,6 +4,7 @@ import { db, handleFirestoreError, OperationType } from '../firebase';
 import { Post, AppUser } from '../types';
 import MarkdownRenderer from './MarkdownRenderer';
 import { ArrowLeft, Heart, Calendar, User, Trash2, Edit, Loader2, Sparkles, Image as ImageIcon } from 'lucide-react';
+import { isSandbox, getMockPosts, likeMockPost, deleteMockPost } from '../sandboxStorage';
 
 interface PostDetailProps {
   postId: string;
@@ -21,6 +22,18 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
   useEffect(() => {
     const fetchPost = async () => {
       setLoading(true);
+      if (isSandbox()) {
+        const mockPosts = getMockPosts();
+        const found = mockPosts.find(p => p.id === postId);
+        if (found) {
+          setPost(found);
+        } else {
+          console.error("No such article post available in sandbox");
+        }
+        setLoading(false);
+        return;
+      }
+
       try {
         const postRef = doc(db, 'posts', postId);
         const postSnap = await getDoc(postRef);
@@ -49,6 +62,16 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
 
     setLiking(true);
     const userId = user.firebaseUid;
+
+    if (isSandbox()) {
+      const updated = likeMockPost(post.id, userId);
+      if (updated) {
+        setPost(updated);
+      }
+      setLiking(false);
+      return;
+    }
+
     const isLiked = post.likers?.includes(userId) || false;
 
     // Correct schema calculations
@@ -89,6 +112,13 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
   const handleDelete = async () => {
     if (!post) return;
     if (!confirm("确定要永久删除本篇文章吗？该操作不可撤销。")) return;
+
+    if (isSandbox()) {
+      deleteMockPost(post.id);
+      alert("文章已被成功删除 (沙盒环境)");
+      onBack();
+      return;
+    }
 
     try {
       const postRef = doc(db, 'posts', post.id);

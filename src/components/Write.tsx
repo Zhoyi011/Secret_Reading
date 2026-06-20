@@ -4,6 +4,7 @@ import { db, handleFirestoreError, OperationType } from '../firebase';
 import ImageUploader from './ImageUploader';
 import { AppUser } from '../types';
 import { Image as ImageIcon, Save, CheckCircle, FileText, ArrowLeft, Loader2, Play, Eye, Edit3 } from 'lucide-react';
+import { isSandbox, getMockPosts, saveMockPost } from '../sandboxStorage';
 
 interface WriteProps {
   user: AppUser | null;
@@ -21,13 +22,26 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [activeTab, setActiveTab] = useState<'edit' | 'preview'>('edit');
 
-  const currentPostIdRef = useRef<string>(draftId || doc(collection(db, 'posts')).id);
+  const currentPostIdRef = useRef<string>(draftId || `post-${Date.now()}`);
 
   // Load existing article draft or post if editing
   useEffect(() => {
     if (draftId) {
       const loadPost = async () => {
         try {
+          if (isSandbox()) {
+            const mockPosts = getMockPosts();
+            const found = mockPosts.find(p => p.id === draftId);
+            if (found) {
+              setTitle(found.title || '');
+              setContent(found.content || '');
+              setImages(found.images || []);
+              setStatus(found.status || 'draft');
+              currentPostIdRef.current = draftId;
+            }
+            return;
+          }
+
           const postRef = doc(db, 'posts', draftId);
           const postSnap = await getDoc(postRef);
           if (postSnap.exists()) {
@@ -61,7 +75,6 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
     if (!user) return;
     setSaveStatus('saving');
     try {
-      const postRef = doc(db, 'posts', currentPostIdRef.current);
       const now = new Date().toISOString();
       const payload = {
         id: currentPostIdRef.current,
@@ -77,7 +90,13 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
         updatedAt: now,
       };
 
-      await setDoc(postRef, payload, { merge: true });
+      if (isSandbox()) {
+        saveMockPost(payload);
+      } else {
+        const postRef = doc(db, 'posts', currentPostIdRef.current);
+        await setDoc(postRef, payload, { merge: true });
+      }
+
       setLastSaved(new Date().toLocaleTimeString());
       setSaveStatus('saved');
     } catch (err) {
@@ -106,38 +125,60 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
 
     setIsSaving(true);
     try {
-      const postRef = doc(db, 'posts', currentPostIdRef.current);
       const now = new Date().toISOString();
       
       // Load current document to keep total likes or keep it secure
       let likes = 0;
       let likers: string[] = [];
-      try {
-        const snap = await getDoc(postRef);
-        if (snap.exists()) {
-          likes = snap.data().likes || 0;
-          likers = snap.data().likers || [];
+
+      if (isSandbox()) {
+        const mockPosts = getMockPosts();
+        const existing = mockPosts.find(p => p.id === currentPostIdRef.current);
+        if (existing) {
+          likes = existing.likes || 0;
+          likers = existing.likers || [];
         }
-      } catch (_) {}
 
-      const payload = {
-        id: currentPostIdRef.current,
-        title,
-        content,
-        authorId: user.firebaseUid,
-        authorName: user.username,
-        images,
-        likes,
-        likers,
-        status: 'published' as const,
-        createdAt: now,
-        updatedAt: now,
-      };
+        saveMockPost({
+          id: currentPostIdRef.current,
+          title,
+          content,
+          authorId: user.firebaseUid,
+          authorName: user.username,
+          images,
+          likes,
+          likers,
+          status: 'published' as const,
+        });
+      } else {
+        const postRef = doc(db, 'posts', currentPostIdRef.current);
+        try {
+          const snap = await getDoc(postRef);
+          if (snap.exists()) {
+            likes = snap.data().likes || 0;
+            likers = snap.data().likers || [];
+          }
+        } catch (_) {}
 
-      try {
-        await setDoc(postRef, payload);
-      } catch (fError) {
-        handleFirestoreError(fError, OperationType.WRITE, `posts/${currentPostIdRef.current}`);
+        const payload = {
+          id: currentPostIdRef.current,
+          title,
+          content,
+          authorId: user.firebaseUid,
+          authorName: user.username,
+          images,
+          likes,
+          likers,
+          status: 'published' as const,
+          createdAt: now,
+          updatedAt: now,
+        };
+
+        try {
+          await setDoc(postRef, payload);
+        } catch (fError) {
+          handleFirestoreError(fError, OperationType.WRITE, `posts/${currentPostIdRef.current}`);
+        }
       }
 
       setSaveStatus('saved');

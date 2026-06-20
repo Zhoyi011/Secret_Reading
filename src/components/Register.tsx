@@ -38,6 +38,7 @@ export default function Register({ onNavigate, onSuccess }: RegisterProps) {
     setError(null);
 
     try {
+      localStorage.removeItem('local_mock_user');
       // 1. Firebase authentication account creation
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
@@ -74,6 +75,8 @@ export default function Register({ onNavigate, onSuccess }: RegisterProps) {
         errMsg = "密码强度不足，请至少设置 6 位字符";
       } else if (err.code === 'auth/invalid-email') {
         errMsg = "电子邮箱格式错误";
+      } else if (err.code === 'auth/operation-not-allowed') {
+        errMsg = "Firebase 核心操作已被拒绝 (Authentication operation-not-allowed)。这是因为您尚未在 Firebase Console (控制台) ➔ Authentication ➔ Sign-in method 中开启「邮箱/密码」(Email/Password) 登录渠道。在此之前，您可以随时返回登录页一键开启「沙盒免配置测试账号」来无碍预览全平台系统！";
       } else {
         // Parse custom firestore or other thrown messages
         try {

@@ -3,6 +3,7 @@ import { collection, query, where, getDocs, orderBy, onSnapshot } from 'firebase
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { Post, AppUser } from '../types';
 import { Search, PenTool, LayoutGrid, List, Heart, Calendar, ArrowRight, User as UserIcon, BookOpen, AlertCircle } from 'lucide-react';
+import { isSandbox, getMockPosts } from '../sandboxStorage';
 
 interface HomeProps {
   user: AppUser | null;
@@ -18,6 +19,14 @@ export default function Home({ user, onNavigate, onSelectPost }: HomeProps) {
 
   useEffect(() => {
     setLoading(true);
+    if (isSandbox()) {
+      // Local sandbox loads mock posts from localStorage
+      const mockPosts = getMockPosts().filter(p => p.status === 'published');
+      setPosts(mockPosts);
+      setLoading(false);
+      return;
+    }
+
     const postsRef = collection(db, 'posts');
     // Query published articles, sorted by creation date descending
     const q = query(
