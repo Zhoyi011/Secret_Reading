@@ -3,7 +3,6 @@ import { collection, updateDoc, doc, deleteDoc, onSnapshot } from 'firebase/fire
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { AppUser, Post } from '../types';
 import { Users, BookOpen, ShieldAlert, KeyRound, Trash2, Calendar, Shield, ArrowLeft, Loader2, Edit3 } from 'lucide-react';
-import { isSandbox, getMockUsers, updateMockUserRole, getMockPosts, deleteMockPost } from '../sandboxStorage';
 
 interface AdminProps {
   user: AppUser | null;
@@ -25,15 +24,6 @@ export default function Admin({ user, onNavigate, onSelectPost }: AdminProps) {
   // 1. Listen or fetch users list safely
   useEffect(() => {
     if (!isOwner) return;
-
-    if (isSandbox()) {
-      setLoadingUsers(true);
-      const loadedUsers = getMockUsers();
-      loadedUsers.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-      setUsersList(loadedUsers);
-      setLoadingUsers(false);
-      return;
-    }
 
     setLoadingUsers(true);
     const usersRef = collection(db, 'users');
@@ -58,15 +48,6 @@ export default function Admin({ user, onNavigate, onSelectPost }: AdminProps) {
   // 2. Fetch posts list safely (including drafts!)
   useEffect(() => {
     if (!isOwner) return;
-
-    if (isSandbox()) {
-      setLoadingPosts(true);
-      const loadedPosts = getMockPosts();
-      loadedPosts.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-      setPostsList(loadedPosts);
-      setLoadingPosts(false);
-      return;
-    }
 
     setLoadingPosts(true);
     const postsRef = collection(db, 'posts');
@@ -100,13 +81,6 @@ export default function Admin({ user, onNavigate, onSelectPost }: AdminProps) {
     }
 
     try {
-      if (isSandbox()) {
-        updateMockUserRole(targetUser.firebaseUid, nextRole);
-        setRefreshTrigger((prev) => prev + 1);
-        alert("权限更新成功 (沙盒模拟)！");
-        return;
-      }
-
       const userRef = doc(db, 'users', targetUser.firebaseUid);
       
       try {
@@ -128,13 +102,6 @@ export default function Admin({ user, onNavigate, onSelectPost }: AdminProps) {
     }
 
     try {
-      if (isSandbox()) {
-        deleteMockPost(post.id);
-        setRefreshTrigger((prev) => prev + 1);
-        alert("文章已被成功删除 (沙盒环境)");
-        return;
-      }
-
       const postRef = doc(db, 'posts', post.id);
       
       try {

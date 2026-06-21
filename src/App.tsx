@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, getDoc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from './firebase';
 import { AppUser } from './types';
 import Login from './components/Login';
@@ -12,43 +12,21 @@ import Admin from './components/Admin';
 import Profile from './components/Profile';
 import Settings from './components/Settings';
 import { motion, AnimatePresence } from 'motion/react';
-import { BookOpen, User, Shield, Compass, LogOut, Settings as SettingsIcon, PenTool, Loader2, RefreshCw, AlertTriangle } from 'lucide-react';
+import { BookOpen, User, Shield, Compass, LogOut, Settings as SettingsIcon, Loader2 } from 'lucide-react';
 
 export default function App() {
   const [user, setUser] = useState<AppUser | null>(null);
   const [firebaseUser, setFirebaseUser] = useState<any>(null);
-  const [sandboxUser, setSandboxUser] = useState<AppUser | null>(() => {
-    const cachedLocalUser = localStorage.getItem('local_mock_user');
-    if (cachedLocalUser) {
-      try {
-        return JSON.parse(cachedLocalUser);
-      } catch (e) {
-        localStorage.removeItem('local_mock_user');
-      }
-    }
-    return null;
-  });
   const [authLoading, setAuthLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(false);
   const [route, setRoute] = useState<string>('home'); // 'home', 'login', 'register', 'write', 'profile', 'admin', 'settings', 'post-detail'
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
 
-  // 1. Listen to Firebase authentication status or adapt to sandboxUser
+  // 1. Listen to Firebase authentication status
   useEffect(() => {
-    // If sandbox (mock) session is active, update the user state synchronously
-    if (sandboxUser) {
-      setUser(sandboxUser);
-      setAuthLoading(false);
-      if (route === 'login' || route === 'register') {
-        setRoute('home');
-      }
-      return;
-    }
-
     let activeSnapshotUnsubscribe: (() => void) | null = null;
 
-    // Otherwise, listen properly to Firebase Authentication
     const unsubscribe = onAuthStateChanged(auth, (fbUser) => {
       // Unsubscribe from any previous profile snapshot listener to prevent leaks
       if (activeSnapshotUnsubscribe) {
@@ -76,11 +54,34 @@ export default function App() {
             if (route === 'login' || route === 'register') {
               setRoute('home');
             }
+            setProfileLoading(false);
+            setAuthLoading(false);
           } else {
             console.warn("Firestore User profile document missing or creating...");
+            // Non-blocking auto-creation with deliberate delay to prevent lockout or race condition errors
+            setTimeout(async () => {
+              try {
+                const checkDoc = await getDoc(userRef);
+                if (!checkDoc.exists() && fbUser) {
+                  const emailVal = fbUser.email || '';
+                  const isBootstrapOwner = emailVal.toLowerCase().trim() === 'zhoyilee@gmail.com';
+                  const initialRole = isBootstrapOwner ? 'owner' : 'reader';
+                  const payload = {
+                    firebaseUid: fbUser.uid,
+                    email: emailVal.toLowerCase().trim(),
+                    username: fbUser.displayName || `读者_${fbUser.uid.slice(0, 6)}`,
+                    birthday: '',
+                    avatar: fbUser.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
+                    role: initialRole,
+                    createdAt: new Date().toISOString(),
+                  };
+                  await setDoc(userRef, payload);
+                }
+              } catch (bootstrapErr) {
+                console.error("Auto-bootstrap profile failed during delay:", bootstrapErr);
+              }
+            }, 1000);
           }
-          setProfileLoading(false);
-          setAuthLoading(false);
         }, (err) => {
           console.error("Listening user's profile failed:", err);
           setProfileLoading(false);
@@ -97,18 +98,9 @@ export default function App() {
         activeSnapshotUnsubscribe();
       }
     };
-  }, [sandboxUser]);
+  }, []);
 
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
-  const [showCleanDialog, setShowCleanDialog] = useState(false);
-
-  const performFullStorageCleanAndRedirect = () => {
-    // Completely clear both localStorage and sessionStorage
-    localStorage.clear();
-    sessionStorage.clear();
-    // Force a complete browser page refresh using location replace
-    window.location.replace('/');
-  };
 
   const handleLogout = async () => {
     setAuthLoading(true);
@@ -118,7 +110,6 @@ export default function App() {
     setFirebaseUser(null);
     setSelectedPostId(null);
     setEditingPostId(null);
-    setSandboxUser(null);
     
     // 2. Perform Firebase client signOut which clears tokens in indexDB
     try {
@@ -127,7 +118,7 @@ export default function App() {
       console.error("Firebase sign out error:", err);
     }
     
-    // 3. Clear session storage and the sandbox-specific session keys
+    // 3. Clear session storage
     localStorage.removeItem('local_mock_user');
     
     // 4. Navigate softly to the clean login screen
@@ -135,39 +126,7 @@ export default function App() {
     setAuthLoading(false);
   };
 
-  const handleCleanSession = async () => {
-    setAuthLoading(true);
-    
-    // 1. Clear memory states
-    setUser(null);
-    setFirebaseUser(null);
-    setSelectedPostId(null);
-    setEditingPostId(null);
-    setSandboxUser(null);
-    
-    // 2. Perform Firebase client signOut
-    try {
-      await signOut(auth);
-    } catch (err) {
-      console.error("Firebase sign out error:", err);
-    }
-    
-    // 3. Clear all persistent states completely and refresh browser
-    performFullStorageCleanAndRedirect();
-  };
-
   const handleAuthSuccess = () => {
-    const cachedLocalUser = localStorage.getItem('local_mock_user');
-    if (cachedLocalUser) {
-      try {
-        const parsed = JSON.parse(cachedLocalUser);
-        setSandboxUser(parsed);
-      } catch (e) {
-        setSandboxUser(null);
-      }
-    } else {
-      setSandboxUser(null);
-    }
     setRoute('home');
   };
 
@@ -178,11 +137,6 @@ export default function App() {
 
   const handleEditPost = (postId: string) => {
     setEditingPostId(postId);
-    setRoute('write');
-  };
-
-  const handleWriteNavigate = () => {
-    setEditingPostId(null);
     setRoute('write');
   };
 
@@ -221,7 +175,7 @@ export default function App() {
       case 'profile':
         return <Profile user={user} onNavigate={setRoute} onSelectPost={handleSelectPost} onEditPost={handleEditPost} />;
       case 'settings':
-        return <Settings onBack={() => setRoute('home')} />;
+        return <Settings user={user} onBack={() => setRoute('home')} />;
       default:
         return <Home user={user} onNavigate={setRoute} onSelectPost={handleSelectPost} />;
     }
@@ -283,24 +237,13 @@ export default function App() {
 
               <button
                 onClick={() => setRoute('settings')}
-                title="图床证书设置"
+                title="个人资料设置"
                 className={`p-2 rounded-xl transition-all ${route === 'settings' ? 'bg-indigo-50 text-indigo-600' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'}`}
               >
                 <SettingsIcon className="h-4.5 w-4.5" />
               </button>
 
               <div className="h-4 w-px bg-gray-200 mx-1 sm:mx-2"></div>
-
-              {/* 手动强制清理会话注销 */}
-              <button
-                onClick={() => setShowCleanDialog(true)}
-                title="强力清理整个会话与浏览器本地缓存"
-                className="px-2.5 py-1.5 rounded-xl border border-amber-200 hover:bg-amber-50 text-amber-700 font-semibold text-[11px] transition-all flex items-center gap-1 cursor-pointer"
-                id="clean-session-button"
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">清理会话</span>
-              </button>
 
               <button
                 onClick={() => setShowLogoutDialog(true)}
@@ -334,11 +277,11 @@ export default function App() {
       {!isAuthPage && (
         <footer className="py-6 text-center text-[10px] text-gray-400 border-t border-gray-100/60 bg-white">
           <div className="max-w-6xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2.5">
-            <span className="font-medium">© 2026 私密阅读专栏. 享受阅读的纯粹与宁静.</span>
+            <span className="font-medium">© 2026 私密阅读专栏. 阮梅230 刻晴95.</span>
             <div className="flex items-center gap-3 font-semibold text-gray-500">
               <span className="bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded font-mono">Firebase Online</span>
               <button onClick={() => setRoute('settings')} className="hover:text-indigo-600 hover:underline">
-                图床证书对接
+                个人资料设置
               </button>
             </div>
           </div>
@@ -363,7 +306,7 @@ export default function App() {
               </div>
               
               <p className="text-sm text-gray-500 mb-6 leading-relaxed" id="logout-modal-desc">
-                您确定要安全退出当前阅读账号吗？此操作将妥善关闭当前的 Firebase 与沙盒会话，并跳转回至登录界面。
+                您确定要安全退出当前阅读账号吗？此操作将妥善关闭当前的 Firebase 回话并跳转回至登录界面。
               </p>
               
               <div className="flex gap-3">
@@ -383,51 +326,6 @@ export default function App() {
                   id="confirm-logout-btn"
                 >
                   确认登出
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* 强力清理会话确认模态框 */}
-      <AnimatePresence>
-        {showCleanDialog && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs" id="clean-confirm-modal">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl border border-gray-100/60"
-            >
-              <div className="flex items-center gap-3 text-amber-600 mb-3" id="clean-modal-title">
-                <div className="p-2.5 bg-amber-50 rounded-xl">
-                  <AlertTriangle className="h-6 w-6" />
-                </div>
-                <h3 className="text-lg font-bold text-gray-900">强制注销 & 清理会话</h3>
-              </div>
-              
-              <p className="text-sm text-gray-500 mb-6 leading-relaxed" id="clean-modal-desc">
-                该操作将深度清除您在这台设备上的所有本地缓存、系统 Session 令牌与沙盒存储，并重载刷新浏览器。这能确保多设备同步时完全清理残留状态。确认发起强力重置吗？
-              </p>
-              
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowCleanDialog(false)}
-                  className="flex-1 py-2.5 bg-gray-50 hover:bg-gray-100 text-gray-600 font-semibold rounded-xl text-xs transition-all cursor-pointer"
-                  id="cancel-clean-btn"
-                >
-                  我再想想
-                </button>
-                <button
-                  onClick={() => {
-                    setShowCleanDialog(false);
-                    handleCleanSession();
-                  }}
-                  className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-xl text-xs transition-all cursor-pointer shadow-sm shadow-amber-600/10"
-                  id="confirm-clean-btn"
-                >
-                  强力重置刷新
                 </button>
               </div>
             </motion.div>

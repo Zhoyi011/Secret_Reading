@@ -4,7 +4,6 @@ import { db, handleFirestoreError, OperationType } from '../firebase';
 import { Post, AppUser } from '../types';
 import MarkdownRenderer from './MarkdownRenderer';
 import { ArrowLeft, Heart, Calendar, User, Trash2, Edit, Loader2, Sparkles, Image as ImageIcon } from 'lucide-react';
-import { isSandbox, getMockPosts, likeMockPost, deleteMockPost } from '../sandboxStorage';
 
 interface PostDetailProps {
   postId: string;
@@ -22,17 +21,6 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
   useEffect(() => {
     const fetchPost = async () => {
       setLoading(true);
-      if (isSandbox()) {
-        const mockPosts = getMockPosts();
-        const found = mockPosts.find(p => p.id === postId);
-        if (found) {
-          setPost(found);
-        } else {
-          console.error("No such article post available in sandbox");
-        }
-        setLoading(false);
-        return;
-      }
 
       try {
         const postRef = doc(db, 'posts', postId);
@@ -62,15 +50,6 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
 
     setLiking(true);
     const userId = user.firebaseUid;
-
-    if (isSandbox()) {
-      const updated = likeMockPost(post.id, userId);
-      if (updated) {
-        setPost(updated);
-      }
-      setLiking(false);
-      return;
-    }
 
     const isLiked = post.likers?.includes(userId) || false;
 
@@ -112,13 +91,6 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
   const handleDelete = async () => {
     if (!post) return;
     if (!confirm("确定要永久删除本篇文章吗？该操作不可撤销。")) return;
-
-    if (isSandbox()) {
-      deleteMockPost(post.id);
-      alert("文章已被成功删除 (沙盒环境)");
-      onBack();
-      return;
-    }
 
     try {
       const postRef = doc(db, 'posts', post.id);
@@ -228,19 +200,27 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
 
         {/* Primary cover / gallery section */}
         {post.images && post.images.length > 0 && (
-          <div className="space-y-2">
-            <div className="aspect-video w-full rounded-2xl overflow-hidden border border-gray-100/50">
+          <div className="space-y-3">
+            <div className="w-full rounded-2xl overflow-hidden border border-gray-100 bg-gray-50 flex items-center justify-center max-h-[550px] p-1.5 shadow-2xs">
               <img
                 src={post.images[0]}
                 alt="Post Cover Banner"
-                className="w-full h-full object-cover"
+                className="w-full h-auto max-h-[520px] object-contain rounded-xl select-none"
+                loading="eager"
+                referrerPolicy="no-referrer"
               />
             </div>
             {post.images.length > 1 && (
-              <div className="grid grid-cols-4 gap-2">
+              <div className="grid grid-cols-4 gap-2.5">
                 {post.images.slice(1).map((img, idx) => (
-                  <div key={idx} className="aspect-video rounded-lg overflow-hidden border border-gray-100">
-                    <img src={img} alt={`Gallery index ${idx}`} className="w-full h-full object-cover" />
+                  <div key={idx} className="aspect-square sm:aspect-video rounded-xl overflow-hidden border border-gray-150/60 bg-gray-50 flex items-center justify-center p-0.5 hover:border-indigo-200 transition-colors cursor-zoom-in">
+                    <img 
+                      src={img} 
+                      alt={`Gallery index ${idx}`} 
+                      className="w-full h-full object-cover rounded-lg"
+                      loading="lazy"
+                      referrerPolicy="no-referrer"
+                    />
                   </div>
                 ))}
               </div>

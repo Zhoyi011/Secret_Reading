@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { collection, doc, setDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import ImageUploader from './ImageUploader';
 import { AppUser } from '../types';
 import { Image as ImageIcon, Save, CheckCircle, FileText, ArrowLeft, Loader2, Play, Eye, Edit3 } from 'lucide-react';
-import { isSandbox, getMockPosts, saveMockPost } from '../sandboxStorage';
 
 interface WriteProps {
   user: AppUser | null;
@@ -24,24 +23,28 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
 
   const currentPostIdRef = useRef<string>(draftId || `post-${Date.now()}`);
 
+  // 1. Role validation check: must be 'author' or 'owner' to compose or edit
+  useEffect(() => {
+    if (user && user.role !== 'author' && user.role !== 'owner') {
+      alert("权限不足！您当前的账户级别没有写作权限。只有创作者 (Author) 或管理员 (Owner) 权限可发文撰写。");
+      onNavigate('home');
+    }
+  }, [user, onNavigate]);
+
+  if (!user || (user.role !== 'author' && user.role !== 'owner')) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center" id="write-loading-verify">
+        <Loader2 className="h-9 w-9 animate-spin text-indigo-600 mb-4" />
+        <p className="text-sm font-medium text-gray-500">正在校验创作者/管理员撰写权，请稍等...</p>
+      </div>
+    );
+  }
+
   // Load existing article draft or post if editing
   useEffect(() => {
     if (draftId) {
       const loadPost = async () => {
         try {
-          if (isSandbox()) {
-            const mockPosts = getMockPosts();
-            const found = mockPosts.find(p => p.id === draftId);
-            if (found) {
-              setTitle(found.title || '');
-              setContent(found.content || '');
-              setImages(found.images || []);
-              setStatus(found.status || 'draft');
-              currentPostIdRef.current = draftId;
-            }
-            return;
-          }
-
           const postRef = doc(db, 'posts', draftId);
           const postSnap = await getDoc(postRef);
           if (postSnap.exists()) {
@@ -90,12 +93,8 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
         updatedAt: now,
       };
 
-      if (isSandbox()) {
-        saveMockPost(payload);
-      } else {
-        const postRef = doc(db, 'posts', currentPostIdRef.current);
-        await setDoc(postRef, payload, { merge: true });
-      }
+      const postRef = doc(db, 'posts', currentPostIdRef.current);
+      await setDoc(postRef, payload, { merge: true });
 
       setLastSaved(new Date().toLocaleTimeString());
       setSaveStatus('saved');
@@ -127,58 +126,36 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
     try {
       const now = new Date().toISOString();
       
-      // Load current document to keep total likes or keep it secure
       let likes = 0;
       let likers: string[] = [];
 
-      if (isSandbox()) {
-        const mockPosts = getMockPosts();
-        const existing = mockPosts.find(p => p.id === currentPostIdRef.current);
-        if (existing) {
-          likes = existing.likes || 0;
-          likers = existing.likers || [];
+      const postRef = doc(db, 'posts', currentPostIdRef.current);
+      try {
+        const snap = await getDoc(postRef);
+        if (snap.exists()) {
+          likes = snap.data().likes || 0;
+          likers = snap.data().likers || [];
         }
+      } catch (_) {}
 
-        saveMockPost({
-          id: currentPostIdRef.current,
-          title,
-          content,
-          authorId: user.firebaseUid,
-          authorName: user.username,
-          images,
-          likes,
-          likers,
-          status: 'published' as const,
-        });
-      } else {
-        const postRef = doc(db, 'posts', currentPostIdRef.current);
-        try {
-          const snap = await getDoc(postRef);
-          if (snap.exists()) {
-            likes = snap.data().likes || 0;
-            likers = snap.data().likers || [];
-          }
-        } catch (_) {}
+      const payload = {
+        id: currentPostIdRef.current,
+        title,
+        content,
+        authorId: user.firebaseUid,
+        authorName: user.username,
+        images: images,
+        likes,
+        likers,
+        status: 'published' as const,
+        createdAt: now,
+        updatedAt: now,
+      };
 
-        const payload = {
-          id: currentPostIdRef.current,
-          title,
-          content,
-          authorId: user.firebaseUid,
-          authorName: user.username,
-          images,
-          likes,
-          likers,
-          status: 'published' as const,
-          createdAt: now,
-          updatedAt: now,
-        };
-
-        try {
-          await setDoc(postRef, payload);
-        } catch (fError) {
-          handleFirestoreError(fError, OperationType.WRITE, `posts/${currentPostIdRef.current}`);
-        }
+      try {
+        await setDoc(postRef, payload);
+      } catch (fError) {
+        handleFirestoreError(fError, OperationType.WRITE, `posts/${currentPostIdRef.current}`);
       }
 
       setSaveStatus('saved');

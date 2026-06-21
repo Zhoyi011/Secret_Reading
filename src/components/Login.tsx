@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from '../firebase';
-import { Loader2, BookOpen, ShieldCheck, HelpCircle, Sparkles } from 'lucide-react';
+import { Loader2, BookOpen, ShieldCheck } from 'lucide-react';
 
 interface LoginProps {
   onNavigate: (route: string) => void;
@@ -53,7 +53,7 @@ export default function Login({ onNavigate, onSuccess }: LoginProps) {
       console.error("Google sign in failed:", err);
       let errMsg = "谷歌登录失败，请重试";
       if (err.code === 'auth/operation-not-allowed') {
-        errMsg = "Google 登录方式在您的 Firebase 控制台中尚未启用。请前往 Firebase Console ➔ Authentication ➔ Sign-in method，启用 Google 选项。";
+        errMsg = "Google 登录方式在您的 Firebase 控制台中尚未启用。请通知管理员在 Firebase Console ➔ Authentication ➔ Sign-in method 里启用 Google 选项。";
       } else if (err.code === 'auth/popup-blocked') {
         errMsg = "登录窗口被浏览器拦截，请允许弹窗后重试";
       } else if (err.code === 'auth/popup-closed-by-user') {
@@ -67,34 +67,18 @@ export default function Login({ onNavigate, onSuccess }: LoginProps) {
     }
   };
 
-  const handleEnterSandbox = (role: 'owner' | 'author' | 'reader') => {
-    const mockUser = {
-      firebaseUid: `mock-uid-${Date.now()}`,
-      email: role === 'owner' ? 'zhoyilee@gmail.com' : `${role}@sandbox.com`,
-      username: role === 'owner' ? '站长大拿 (Sandbox)' : role === 'author' ? '专栏写手 (Sandbox)' : '金牌读者 (Sandbox)',
-      birthday: '2000-01-01',
-      avatar: role === 'owner' 
-        ? 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80'
-        : 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=150&q=80',
-      role: role,
-      createdAt: new Date().toISOString(),
-    };
-    localStorage.setItem('local_mock_user', JSON.stringify(mockUser));
-    onSuccess();
-  };
-
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12 sm:px-6 lg:px-8">
-      <div className="w-full max-w-md space-y-6 bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
+    <div className="flex min-h-screen items-center justify-center bg-[#fafafa] px-4 py-12 sm:px-6 lg:px-8">
+      <div className="w-full max-w-md space-y-6 bg-white p-8 rounded-3xl shadow-xs border border-gray-100">
         <div className="flex flex-col items-center text-center">
           <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 mb-4 shadow-xs">
             <BookOpen className="h-6 w-6" />
           </div>
           <h2 className="font-display text-2xl font-bold tracking-tight text-gray-900">
-            欢迎回到私密阅读空间
+            欢迎回到刻晴No.95 & 阮·梅No.230的私密阅读空间~
           </h2>
           <p className="mt-2 text-sm text-gray-500 font-medium max-w-xs">
-            由于常规邮箱注册已停用，现在请通过 Google 账户一键完成安全快捷的正规登录。
+            请通过 Google 账户登录。
           </p>
         </div>
 
@@ -110,7 +94,7 @@ export default function Login({ onNavigate, onSuccess }: LoginProps) {
             type="button"
             onClick={handleGoogleSignIn}
             disabled={loading}
-            className="w-full flex items-center justify-center gap-3 px-5 py-3.5 border border-indigo-100 hover:border-indigo-300 rounded-2xl text-sm font-bold text-indigo-950 bg-white hover:bg-indigo-50/40 active:scale-[0.99] transition-all disabled:opacity-50 shadow-sm cursor-pointer"
+            className="w-full flex items-center justify-center gap-3 px-5 py-3.5 border border-indigo-100 hover:border-indigo-300 rounded-2xl text-sm font-bold text-indigo-950 bg-white hover:bg-indigo-50/40 active:scale-[0.99] transition-all disabled:opacity-50 shadow-xs cursor-pointer"
             id="google-sign-in-btn"
           >
             {loading ? (
@@ -135,56 +119,19 @@ export default function Login({ onNavigate, onSuccess }: LoginProps) {
                     d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.43 0 3.32 2.69 1.32 6.66l3.92 3.1c.95-2.88 3.61-5.01 6.76-5.01z"
                   />
                 </svg>
-                <span>使用 Google 账号一键安全登录</span>
+                <span>使用 Google 账号</span>
               </>
             )}
           </button>
           
           <div className="flex items-center gap-2 text-center text-[11px] text-gray-500 justify-center bg-gray-50 p-3 rounded-xl border border-gray-100/60 font-semibold">
             <ShieldCheck className="h-4.5 w-4.5 text-indigo-600 shrink-0" />
-            <span>新用户首次通过 Google 登录，将自动生成读者账户</span>
+            <span>采用 Google SS0 原生单点登录，不保存任何第三方明文密码</span>
           </div>
         </div>
 
-        {/* Dynamic developer/sandbox warning */}
-        <div className="border-t border-gray-100 pt-5 mt-2 space-y-4">
-          <div className="bg-amber-50/60 p-3.5 rounded-xl border border-amber-100 flex gap-2.5">
-            <HelpCircle className="h-4.5 w-4.5 text-amber-600 shrink-0 mt-0.5" />
-            <div className="text-[11px] text-amber-950 font-medium leading-relaxed">
-              <span className="font-bold block text-amber-900 mb-0.5">Firebase 登录异常提示</span>
-              若遇到 Google 登录报错，通常是因为在您当前的 Firebase 后台尚未开通 Google 登录提供者，您可进入控制面板完成自助开通。
-            </div>
-          </div>
-
-          <div className="bg-gradient-to-tr from-indigo-50/40 to-indigo-50/70 p-4 rounded-xl border border-indigo-100/30 text-center">
-            <span className="text-[11px] font-bold text-indigo-950 block mb-2.5 flex items-center justify-center gap-1.5">
-              <Sparkles className="h-3.5 w-3.5 text-indigo-600 animate-pulse" />
-              免配置沙盒极速预览 (推荐开发者测试)
-            </span>
-            <div className="grid grid-cols-3 gap-2 text-[10px]">
-              <button
-                onClick={() => handleEnterSandbox('owner')}
-                className="py-2 px-1.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 transition-all text-white font-bold rounded-lg flex items-center justify-center shadow-xs cursor-pointer"
-                id="sandbox-owner-btn"
-              >
-                一键站长
-              </button>
-              <button
-                onClick={() => handleEnterSandbox('author')}
-                className="py-2 px-1.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 transition-all text-white font-bold rounded-lg flex items-center justify-center shadow-xs cursor-pointer"
-                id="sandbox-author-btn"
-              >
-                一键作者
-              </button>
-              <button
-                onClick={() => handleEnterSandbox('reader')}
-                className="py-2 px-1.5 bg-gray-700 hover:bg-gray-600 active:scale-95 transition-all text-white font-bold rounded-lg flex items-center justify-center shadow-xs cursor-pointer"
-                id="sandbox-reader-btn"
-              >
-                金牌读者
-              </button>
-            </div>
-          </div>
+        <div className="border-t border-gray-100 pt-5 text-center text-[11px] text-gray-400">
+          <span>私密阅读专栏 · 专属安全身份校验系统</span>
         </div>
       </div>
     </div>
