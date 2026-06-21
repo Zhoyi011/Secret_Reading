@@ -1,92 +1,63 @@
-import React, { useState } from 'react';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
+import React from 'react';
+import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from '../firebase';
-import ImageUploader from './ImageUploader';
-import { User, Mail, KeyRound, Calendar, Loader2, Sparkles } from 'lucide-react';
+import { BookOpen, ShieldCheck, ArrowLeft, HelpCircle } from 'lucide-react';
 
 interface RegisterProps {
   onNavigate: (route: string) => void;
   onSuccess: () => void;
 }
 
-const PRESET_AVATARS = [
-  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
-  'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80',
-  'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=150&q=80',
-  'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=150&q=80',
-  'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?auto=format&fit=crop&w=150&q=80'
-];
-
 export default function Register({ onNavigate, onSuccess }: RegisterProps) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [username, setUsername] = useState('');
-  const [birthday, setBirthday] = useState('');
-  const [avatar, setAvatar] = useState(PRESET_AVATARS[0]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email || !password || !username || !birthday) {
-      setError("请填写完所有必选或必填字段");
-      return;
-    }
-
+  const handleGoogleSignUp = async () => {
     setLoading(true);
     setError(null);
-
     try {
       localStorage.removeItem('local_mock_user');
-      // 1. Firebase authentication account creation
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      const user = userCredential.user;
-
-      // 2. Determine initial role based on bootstrapping email
-      const isBootstrapOwner = email.toLowerCase().trim() === 'zhoyilee@gmail.com';
-      const initialRole = isBootstrapOwner ? 'owner' : 'reader';
-
-      // 3. Save User metadata to MongoDB/Firestore representation
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+      const result = await signInWithPopup(auth, provider);
+      const user = result.user;
+      
       const userRef = doc(db, 'users', user.uid);
-      const payload = {
-        firebaseUid: user.uid,
-        email: email.toLowerCase().trim(),
-        username,
-        birthday,
-        avatar,
-        role: initialRole,
-        createdAt: new Date().toISOString(),
-      };
-
-      try {
-        await setDoc(userRef, payload);
-      } catch (fError) {
-        handleFirestoreError(fError, OperationType.WRITE, `users/${user.uid}`);
+      const userDoc = await getDoc(userRef);
+      
+      if (!userDoc.exists()) {
+        const emailVal = user.email || '';
+        const isBootstrapOwner = emailVal.toLowerCase().trim() === 'zhoyilee@gmail.com';
+        const initialRole = isBootstrapOwner ? 'owner' : 'reader';
+        
+        const payload = {
+          firebaseUid: user.uid,
+          email: emailVal.toLowerCase().trim(),
+          username: user.displayName || `读者_${user.uid.slice(0, 6)}`,
+          birthday: '',
+          avatar: user.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
+          role: initialRole,
+          createdAt: new Date().toISOString(),
+        };
+        
+        try {
+          await setDoc(userRef, payload);
+        } catch (fError) {
+          handleFirestoreError(fError, OperationType.WRITE, `users/${user.uid}`);
+        }
       }
-
+      
       onSuccess();
     } catch (err: any) {
-      console.error("Registration failed:", err);
-      let errMsg = err.message || "注册失败，请稍后重试";
-      if (err.code === 'auth/email-already-in-use') {
-        errMsg = "此电子邮箱已被注册";
-      } else if (err.code === 'auth/weak-password') {
-        errMsg = "密码强度不足，请至少设置 6 位字符";
-      } else if (err.code === 'auth/invalid-email') {
-        errMsg = "电子邮箱格式错误";
-      } else if (err.code === 'auth/operation-not-allowed') {
-        errMsg = "Firebase 核心操作已被拒绝 (Authentication operation-not-allowed)。这是因为您尚未在 Firebase Console (控制台) ➔ Authentication ➔ Sign-in method 中开启「邮箱/密码」(Email/Password) 登录渠道。在此之前，您可以随时返回登录页一键开启「沙盒免配置测试账号」来无碍预览全平台系统！";
-      } else {
-        // Parse custom firestore or other thrown messages
-        try {
-          const parsed = JSON.parse(err.message);
-          if (parsed.error) {
-            errMsg = `账号登录成功，但个人资料初始化失败：${parsed.error}`;
-          }
-        } catch {
-          // Keep err.message
-        }
+      console.error("Google sign up failed:", err);
+      let errMsg = "注册失败，请返回并重试";
+      if (err.code === 'auth/operation-not-allowed') {
+        errMsg = "Google 登录方式在您的 Firebase 控制台中尚未启用。请前往 Firebase Console ➔ Authentication ➔ Sign-in method，并在提供商中开启 Google 选项。";
+      } else if (err.code === 'auth/popup-blocked') {
+        errMsg = "注册窗口被浏览器拦截，请允许弹窗后重试";
+      } else if (err.message) {
+        errMsg = err.message;
       }
       setError(errMsg);
     } finally {
@@ -95,150 +66,79 @@ export default function Register({ onNavigate, onSuccess }: RegisterProps) {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-8 sm:px-6 lg:px-8">
-      <div className="w-full max-w-xl space-y-6 bg-white p-8 rounded-2xl shadow-sm border border-gray-100">
+    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12 sm:px-6 lg:px-8">
+      <div className="w-full max-w-md space-y-6 bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
         <div className="flex flex-col items-center text-center">
-          <div className="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 mb-2">
-            <Sparkles className="h-6 w-6" />
+          <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 mb-4 shadow-xs">
+            <BookOpen className="h-6 w-6" />
           </div>
           <h2 className="font-display text-2xl font-bold tracking-tight text-gray-900">
-            创建您的阅读账户
+            邮箱账户注册已停用
           </h2>
-          <p className="mt-1 text-sm text-gray-500">
-            加入高品质阅读社区，探索精彩视界
+          <p className="mt-2 text-sm text-gray-500 font-medium max-w-xs">
+            由于常规邮箱注册不受当前项目支持，现已永久关闭。请使用 Google SSO 一键登录，系统将自动录入并为您注册读者身份。
           </p>
         </div>
 
-        <form className="space-y-5" onSubmit={handleSubmit}>
-          {error && (
-            <div className="rounded-lg bg-red-50 p-3 text-sm text-red-800">
-              {error}
-            </div>
-          )}
-
-          <div className="space-y-4">
-            {/* Username */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700">用户名</label>
-              <div className="relative mt-1">
-                <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">
-                  <User className="h-5 w-5" />
-                </div>
-                <input
-                  type="text"
-                  required
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="block w-full rounded-xl border border-gray-300 py-2.5 pl-10 pr-3 text-gray-900 placeholder-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 sm:text-sm"
-                  placeholder="极光朗读者"
-                />
-              </div>
-            </div>
-
-            {/* Email */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700">电子邮箱</label>
-              <div className="relative mt-1">
-                <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">
-                  <Mail className="h-5 w-5" />
-                </div>
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="block w-full rounded-xl border border-gray-300 py-2.5 pl-10 pr-3 text-gray-900 placeholder-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 sm:text-sm"
-                  placeholder="reader@example.com"
-                />
-              </div>
-            </div>
-
-            {/* Password */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700">安全密码</label>
-              <div className="relative mt-1">
-                <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">
-                  <KeyRound className="h-5 w-5" />
-                </div>
-                <input
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="block w-full rounded-xl border border-gray-300 py-2.5 pl-10 pr-3 text-gray-900 placeholder-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 sm:text-sm"
-                  placeholder="至少6位数字或英文字符"
-                />
-              </div>
-            </div>
-
-            {/* Birthday */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700">您的生日</label>
-              <div className="relative mt-1">
-                <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">
-                  <Calendar className="h-5 w-5" />
-                </div>
-                <input
-                  type="date"
-                  required
-                  value={birthday}
-                  onChange={(e) => setBirthday(e.target.value)}
-                  className="block w-full rounded-xl border border-gray-300 py-2.5 pl-10 pr-3 text-gray-900 placeholder-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 sm:text-sm"
-                />
-              </div>
-            </div>
-
-            {/* Avatar picker / uploader */}
-            <div className="pt-2">
-              <label className="block text-sm font-medium text-gray-700 mb-2">选择头像 (可点击预设头像或自己上传)</label>
-              <div className="flex flex-wrap gap-3 mb-4 items-center">
-                {PRESET_AVATARS.map((p, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => setAvatar(p)}
-                    className={`relative rounded-full p-0.5 transition-all outline-none ${avatar === p ? 'ring-2 ring-indigo-600 scale-110 shadow-sm' : 'hover:scale-105 opacity-85'}`}
-                  >
-                    <img src={p} alt="Preset Profile Avatar" className="h-11 w-11 rounded-full object-cover" />
-                  </button>
-                ))}
-                {avatar && !PRESET_AVATARS.includes(avatar) && (
-                  <div className="relative rounded-full p-0.5 ring-2 ring-indigo-600 scale-110">
-                    <img src={avatar} alt="Custom User Profile Avatar" className="h-11 w-11 rounded-full object-cover" />
-                  </div>
-                )}
-              </div>
-
-              <ImageUploader
-                label="上传自定义头像 (对接 Cloudinary / 本地上传)"
-                onUploadSuccess={(url) => setAvatar(url)}
-              />
-            </div>
+        {error && (
+          <div className="rounded-xl bg-rose-50 border border-rose-100 p-4 text-xs text-rose-800 font-medium whitespace-pre-line" id="register-error-container">
+            {error}
           </div>
+        )}
 
-          <div className="pt-2">
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex w-full justify-center rounded-xl bg-indigo-600 px-3 py-3 text-sm font-semibold text-white hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 focus:outline-none transition-all disabled:opacity-50"
-            >
-              {loading ? (
-                <Loader2 className="h-5 w-5 animate-spin" />
-              ) : (
-                "立即注册账户"
-              )}
-            </button>
-          </div>
-        </form>
-
-        <div className="text-center text-sm text-gray-500 mt-4">
-          已经有账户了？{" "}
+        <div className="space-y-4 pt-2">
+          {/* Main Google sign-in button */}
           <button
-            onClick={() => onNavigate('login')}
-            className="font-medium text-indigo-600 hover:text-indigo-500 hover:underline focus:outline-none"
+            type="button"
+            onClick={handleGoogleSignUp}
+            disabled={loading}
+            className="w-full flex items-center justify-center gap-3 px-5 py-3.5 border border-indigo-100 hover:border-indigo-300 rounded-2xl text-sm font-bold text-indigo-950 bg-white hover:bg-indigo-50/40 active:scale-[0.99] transition-all disabled:opacity-50 shadow-sm cursor-pointer"
+            id="google-signup-btn"
           >
-            立即登录
+            {loading ? (
+              <span className="flex items-center gap-1">正在连接 Google 安全网关...</span>
+            ) : (
+              <>
+                <svg className="h-5 w-5 shrink-0" viewBox="0 0 24 24">
+                  <path
+                    fill="#4285F4"
+                    d="M23.745 12.27c0-.77-.07-1.54-.19-2.27H12v4.51h6.6c-.29 1.48-1.14 2.73-2.4 3.58v3h3.86c2.26-2.09 3.68-5.17 3.68-8.82z"
+                  />
+                  <path
+                    fill="#34A853"
+                    d="M12 24c3.24 0 5.97-1.08 7.96-2.91l-3.86-3c-1.08.72-2.45 1.16-4.1 1.16-3.15 0-5.81-2.13-6.76-5.01H1.32v3.1c2 3.97 6.11 6.66 10.68 6.66z"
+                  />
+                  <path
+                    fill="#FBBC05"
+                    d="M5.24 14.24a7.19 7.19 0 0 1 0-4.48V6.66H1.32a11.956 11.956 0 0 0 0 10.68l3.92-3.1z"
+                  />
+                  <path
+                    fill="#EA4335"
+                    d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.43 0 3.32 2.69 1.32 6.66l3.92 3.1c.95-2.88 3.61-5.01 6.76-5.01z"
+                  />
+                </svg>
+                <span>直接通过 Google SSO 自动创建并登录</span>
+              </>
+            )}
           </button>
+
+          <div className="flex items-center gap-2 text-center text-[11px] text-gray-500 justify-center bg-gray-50 p-3 rounded-xl border border-gray-100/60 font-semibold">
+            <ShieldCheck className="h-4.5 w-4.5 text-indigo-600 shrink-0" />
+            <span>采用 Google 原生单点登录，不保存任何第三方明文密码</span>
+          </div>
+        </div>
+
+        <div className="pt-2 border-t border-gray-100 flex justify-between items-center text-xs">
+          <button
+            type="button"
+            onClick={() => onNavigate('login')}
+            className="font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer transition-colors"
+            id="register-back-to-login-btn"
+          >
+            <ArrowLeft className="h-4 w-4" /> 返回登录页
+          </button>
+
+          <span className="text-[11px] text-gray-400">私密阅读专栏安全系统</span>
         </div>
       </div>
     </div>

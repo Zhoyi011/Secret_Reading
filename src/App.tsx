@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, getDoc, onSnapshot } from 'firebase/firestore';
-import { auth, db } from './firebase';
+import { auth, db, handleFirestoreError, OperationType } from './firebase';
 import { AppUser } from './types';
 import Login from './components/Login';
 import Register from './components/Register';
@@ -46,8 +46,16 @@ export default function App() {
       return;
     }
 
+    let activeSnapshotUnsubscribe: (() => void) | null = null;
+
     // Otherwise, listen properly to Firebase Authentication
     const unsubscribe = onAuthStateChanged(auth, (fbUser) => {
+      // Unsubscribe from any previous profile snapshot listener to prevent leaks
+      if (activeSnapshotUnsubscribe) {
+        activeSnapshotUnsubscribe();
+        activeSnapshotUnsubscribe = null;
+      }
+
       setFirebaseUser(fbUser);
       if (!fbUser) {
         setUser(null);
@@ -59,7 +67,7 @@ export default function App() {
         const userRef = doc(db, 'users', fbUser.uid);
         
         // Listen in real-time to user profile changes
-        const unmountSnap = onSnapshot(userRef, (snapshot) => {
+        activeSnapshotUnsubscribe = onSnapshot(userRef, (snapshot) => {
           if (snapshot.exists()) {
             setUser({
               ...snapshot.data(),
@@ -77,13 +85,18 @@ export default function App() {
           console.error("Listening user's profile failed:", err);
           setProfileLoading(false);
           setAuthLoading(false);
+          // Standardized error report
+          handleFirestoreError(err, OperationType.GET, `users/${fbUser.uid}`);
         });
-
-        return () => unmountSnap();
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      if (activeSnapshotUnsubscribe) {
+        activeSnapshotUnsubscribe();
+      }
+    };
   }, [sandboxUser]);
 
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
