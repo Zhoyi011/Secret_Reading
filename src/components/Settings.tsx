@@ -13,7 +13,6 @@ interface SettingsProps {
 
 export default function Settings({ user, onBack }: SettingsProps) {
   const [username, setUsername] = useState('');
-  const [birthday, setBirthday] = useState('');
   const [avatar, setAvatar] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
@@ -24,7 +23,6 @@ export default function Settings({ user, onBack }: SettingsProps) {
   useEffect(() => {
     if (user) {
       setUsername(user.username || '');
-      setBirthday(user.birthday || '');
       setAvatar(user.avatar || '');
       const existingMongo = mongoClient.findUserById(user.firebaseUid);
       if (existingMongo) {
@@ -50,7 +48,6 @@ export default function Settings({ user, onBack }: SettingsProps) {
       const userRef = doc(db, 'users', user.firebaseUid);
       const updatePayload = {
         username: username.trim(),
-        birthday: birthday,
         avatar: avatar.trim(),
       };
 
@@ -59,7 +56,6 @@ export default function Settings({ user, onBack }: SettingsProps) {
       // 2. Simultaneously save to client-side simulated MongoDB cluster
       const updatedMongo = mongoClient.saveUserSettings(user.firebaseUid, {
         username: username.trim(),
-        birthday: birthday,
         avatar: avatar.trim(),
         email: user.email,
         role: user.role
@@ -151,20 +147,6 @@ export default function Settings({ user, onBack }: SettingsProps) {
             />
           </div>
 
-          {/* Birthday */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-bold text-gray-700 flex items-center gap-1.5">
-              <Calendar className="h-4 w-4 text-indigo-500" />
-              <span>生日（Birthday）</span>
-            </label>
-            <input
-              type="date"
-              value={birthday}
-              onChange={(e) => setBirthday(e.target.value)}
-              className="block w-full rounded-xl border border-gray-200 py-3 px-3.5 text-xs text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 shadow-2xs transition-all"
-            />
-          </div>
-
           {/* Custom Avatar URL Field */}
           <div className="space-y-1.5">
             <label className="block text-xs font-bold text-gray-700">头像图片 URL 链接</label>
@@ -250,7 +232,6 @@ export default function Settings({ user, onBack }: SettingsProps) {
           <div className="pl-4"><span className="text-slate-400">"_id":</span> <span className="text-amber-300">"ObjectId('{mongoDoc?._id || '667501a3fedb6329fc...' }')"</span>,</div>
           <div className="pl-4"><span className="text-slate-400">"firebaseUid":</span> <span className="text-teal-300">"{user.firebaseUid}"</span>,</div>
           <div className="pl-4"><span className="text-slate-400">"username":</span> <span className="text-teal-300">"{username || user.username}"</span>,</div>
-          <div className="pl-4"><span className="text-slate-400">"birthday":</span> <span className="text-teal-300">"{birthday ? birthday : 'Not Configured'}"</span>,</div>
           <div className="pl-4"><span className="text-slate-400">"avatar":</span> <span className="text-teal-300">"{avatar ? (avatar.length > 50 ? avatar.slice(0, 50) + "..." : avatar) : 'Default'}"</span>,</div>
           <div className="pl-4"><span className="text-slate-400">"role":</span> <span className="text-teal-300">"{user.role}"</span>,</div>
           <div className="pl-4"><span className="text-slate-400">"updatedAt":</span> <span className="text-amber-300">"{mongoDoc?.updatedAt || new Date().toISOString()}"</span>,</div>

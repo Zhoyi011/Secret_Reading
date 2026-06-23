@@ -3,7 +3,8 @@ import { doc, getDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { Post, AppUser } from '../types';
 import MarkdownRenderer from './MarkdownRenderer';
-import { ArrowLeft, Heart, Calendar, User, Trash2, Edit, Loader2, Sparkles, Image as ImageIcon } from 'lucide-react';
+import { ArrowLeft, Heart, Calendar, User, Trash2, Edit, Loader2, Sparkles, Image as ImageIcon, AlertTriangle, CheckCircle, X, Copy } from 'lucide-react';
+import ImageWrapper from './ImageWrapper';
 
 interface PostDetailProps {
   postId: string;
@@ -17,6 +18,21 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
   const [post, setPost] = useState<Post | null>(null);
   const [loading, setLoading] = useState(true);
   const [liking, setLiking] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [copiedTitle, setCopiedTitle] = useState(false);
+
+  const handleCopyTitle = async () => {
+    if (!post) return;
+    try {
+      await navigator.clipboard.writeText(post.title);
+      setCopiedTitle(true);
+      setTimeout(() => setCopiedTitle(false), 2000);
+    } catch (err) {
+      console.error("Clipboard copy failed:", err);
+    }
+  };
 
   useEffect(() => {
     const fetchPost = async () => {
@@ -80,17 +96,32 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
         likes: updatedLikesCount,
         likers: updatedLikers,
       } : null);
+      
+      setToastMessage({
+        type: 'success',
+        text: isAlreadyLiked ? "已取消赞赏！" : "点赞赞赏文章成功！"
+      });
+      setTimeout(() => setToastMessage(null), 3500);
     } catch (err: any) {
       console.error("Liking transaction failed:", err);
-      alert("点赞操作失败: " + err.message);
+      setToastMessage({
+        type: 'error',
+        text: "点赞操作失败: " + (err.message || String(err))
+      });
+      setTimeout(() => setToastMessage(null), 4000);
     } finally {
       setLiking(false);
     }
   };
 
-  const handleDelete = async () => {
+  const initiateDelete = () => {
+    setShowDeleteModal(true);
+  };
+
+  const executeDelete = async () => {
     if (!post) return;
-    if (!confirm("确定要永久删除本篇文章吗？该操作不可撤销。")) return;
+    setDeleting(true);
+    setToastMessage(null);
 
     try {
       const postRef = doc(db, 'posts', post.id);
@@ -101,11 +132,17 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
         handleFirestoreError(fError, OperationType.DELETE, `posts/${post.id}`);
       }
 
-      alert("文章已被成功删除");
-      onBack();
+      setToastMessage({ type: 'success', text: "博文已成功永久移除！" });
+      setTimeout(() => {
+        setShowDeleteModal(false);
+        onBack();
+      }, 1500);
     } catch (err: any) {
       console.error("Delete post failed:", err);
-      alert("删除失败: " + err.message);
+      setToastMessage({ type: 'error', text: "删除文章出错：" + (err.message || String(err)) });
+      setTimeout(() => setToastMessage(null), 4500);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -163,7 +200,7 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
 
             {(isAuthor || isAdminOrOwner) && (
               <button
-                onClick={handleDelete}
+                onClick={initiateDelete}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-50 border border-rose-100 text-rose-600 hover:bg-rose-100 transition-all text-xs font-semibold"
               >
                 <Trash2 className="h-3.5 w-3.5" />
@@ -177,9 +214,28 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
       {/* Main post container */}
       <article className="bg-white rounded-3xl border border-gray-100 shadow-sm p-6 sm:p-10 space-y-6">
         <div className="space-y-4">
-          <h1 className="font-display font-bold text-gray-950 text-2xl sm:text-3.5xl tracking-tight leading-snug">
-            {post.title}
-          </h1>
+          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+            <h1 className="font-display font-bold text-gray-950 text-2xl sm:text-3.5xl tracking-tight leading-snug flex-1">
+              {post.title}
+            </h1>
+            <button
+              onClick={handleCopyTitle}
+              className="allow-copy shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-gray-150 text-gray-500 hover:text-indigo-600 hover:border-indigo-100 hover:bg-indigo-50/50 transition-all text-xs font-semibold self-start shadow-2xs cursor-pointer"
+              title="拷贝这篇博文的标题"
+            >
+              {copiedTitle ? (
+                <>
+                  <CheckCircle className="h-3.5 w-3.5 text-emerald-500" />
+                  <span className="text-emerald-600">已拷贝标题</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="h-3.5 w-3.5" />
+                  <span>拷贝标题</span>
+                </>
+              )}
+            </button>
+          </div>
 
           <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500 pt-2 pb-4 border-b border-gray-100/80">
             <div className="flex items-center gap-1.5 text-gray-700 font-semibold">
@@ -201,25 +257,25 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
         {/* Primary cover / gallery section */}
         {post.images && post.images.length > 0 && (
           <div className="space-y-3">
-            <div className="w-full rounded-2xl overflow-hidden border border-gray-100 bg-gray-50 flex items-center justify-center max-h-[550px] p-1.5 shadow-2xs">
-              <img
+            <div className="max-w-md mx-auto w-full rounded-2xl overflow-hidden border border-gray-100 bg-gray-50 flex items-center justify-center max-h-[340px] p-1.5 shadow-2xs">
+              <ImageWrapper
                 src={post.images[0]}
                 alt="Post Cover Banner"
-                className="w-full h-auto max-h-[520px] object-contain rounded-xl select-none"
-                loading="eager"
-                referrerPolicy="no-referrer"
+                width={500}
+                className="w-full h-auto max-h-[325px] object-contain rounded-xl select-none"
+                placeholderClassName="w-full h-auto max-h-[325px] rounded-xl"
               />
             </div>
             {post.images.length > 1 && (
               <div className="grid grid-cols-4 gap-2.5">
                 {post.images.slice(1).map((img, idx) => (
                   <div key={idx} className="aspect-square sm:aspect-video rounded-xl overflow-hidden border border-gray-150/60 bg-gray-50 flex items-center justify-center p-0.5 hover:border-indigo-200 transition-colors cursor-zoom-in">
-                    <img 
+                    <ImageWrapper 
                       src={img} 
                       alt={`Gallery index ${idx}`} 
+                      width={200}
                       className="w-full h-full object-cover rounded-lg"
-                      loading="lazy"
-                      referrerPolicy="no-referrer"
+                      placeholderClassName="w-full h-full rounded-lg"
                     />
                   </div>
                 ))}
@@ -249,6 +305,77 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
           <p className="text-[10px] text-gray-400 mt-2.5 font-medium">每位签约读者对单篇文章只能点赞或取消一次</p>
         </div>
       </article>
+
+      {/* Toast Notification Banner */}
+      {toastMessage && (
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 shadow-xl" id="custom-toast">
+          <div className={`flex items-center gap-2 px-5 py-3 rounded-full border text-xs font-bold ${
+            toastMessage.type === 'success' 
+              ? 'bg-emerald-50 border-emerald-100 text-emerald-800' 
+              : 'bg-rose-50 border-rose-100 text-rose-800'
+          }`}>
+            {toastMessage.type === 'success' ? (
+              <CheckCircle className="h-4 w-4 text-emerald-600 shrink-0" />
+            ) : (
+              <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0" />
+            )}
+            <span>{toastMessage.text}</span>
+            <button onClick={() => setToastMessage(null)} className="ml-2 hover:opacity-75">
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Delete Confirmation Modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 bg-zinc-950/40 backdrop-blur-xs flex items-center justify-center p-4 z-50" id="delete-confirm-modal">
+          <div className="bg-white rounded-3xl max-w-md w-full border border-gray-100 p-6 sm:p-8 shadow-2xl space-y-6">
+            <div className="flex items-start gap-4">
+              <div className="p-3 bg-rose-50 rounded-2xl text-rose-600">
+                <Trash2 className="h-6 w-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-lg font-bold text-gray-900 font-display">确认永久删除文章吗？</h3>
+                <p className="text-xs text-gray-450 uppercase font-mono font-semibold tracking-wider">Dangerous Action</p>
+              </div>
+            </div>
+
+            <p className="text-xs leading-relaxed text-gray-500">
+              您正在请求永久删除文章 <span className="font-semibold text-gray-850 text-rose-650">「{post?.title}」</span>。此操作会将文章从数据库服务器永久移除，相关的赞赏、喜欢及排版记录也会彻底消失，且<span className="font-semibold text-rose-650">不可恢复</span>。
+            </p>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => setShowDeleteModal(false)}
+                className="flex-1 py-3 px-4 bg-gray-50 hover:bg-gray-100 text-gray-700 font-bold rounded-2xl text-xs transition-colors border border-gray-100 flex items-center justify-center cursor-pointer disabled:opacity-50"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={executeDelete}
+                className="flex-1 py-3 px-4 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-2xl text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-rose-600/10 disabled:opacity-50"
+              >
+                {deleting ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    正在删除...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-3.5 w-3.5" />
+                    确认永久删除
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

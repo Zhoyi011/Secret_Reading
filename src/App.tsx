@@ -11,6 +11,7 @@ import PostDetail from './components/PostDetail';
 import Admin from './components/Admin';
 import Profile from './components/Profile';
 import Settings from './components/Settings';
+import Onboarding from './components/Onboarding';
 import { motion, AnimatePresence } from 'motion/react';
 import { BookOpen, User, Shield, Compass, LogOut, Settings as SettingsIcon, Loader2 } from 'lucide-react';
 
@@ -19,6 +20,7 @@ export default function App() {
   const [firebaseUser, setFirebaseUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(false);
+  const [firestoreError, setFirestoreError] = useState<string | null>(null);
   const [route, setRoute] = useState<string>('home'); // 'home', 'login', 'register', 'write', 'profile', 'admin', 'settings', 'post-detail'
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
@@ -39,6 +41,7 @@ export default function App() {
         setUser(null);
         setRoute('login');
         setAuthLoading(false);
+        setFirestoreError(null);
       } else {
         // Feed user document from Firestore dynamically
         setProfileLoading(true);
@@ -56,13 +59,14 @@ export default function App() {
             }
             setProfileLoading(false);
             setAuthLoading(false);
+            setFirestoreError(null);
           } else {
             console.warn("Firestore User profile document missing or creating...");
             // Non-blocking auto-creation with deliberate delay to prevent lockout or race condition errors
             setTimeout(async () => {
               try {
-                const checkDoc = await getDoc(userRef);
-                if (!checkDoc.exists() && fbUser) {
+                // Check if user is still logged in before writing
+                if (auth.currentUser) {
                   const emailVal = fbUser.email || '';
                   const isBootstrapOwner = emailVal.toLowerCase().trim() === 'zhoyilee@gmail.com';
                   const initialRole = isBootstrapOwner ? 'owner' : 'reader';
@@ -77,8 +81,12 @@ export default function App() {
                   };
                   await setDoc(userRef, payload);
                 }
-              } catch (bootstrapErr) {
+              } catch (bootstrapErr: any) {
                 console.error("Auto-bootstrap profile failed during delay:", bootstrapErr);
+                const errMsg = bootstrapErr?.message || String(bootstrapErr);
+                if (errMsg.includes('offline') || errMsg.includes('client is offline')) {
+                  setFirestoreError(`初始化用户配置失败，处于离线状态: ${errMsg}`);
+                }
               }
             }, 1000);
           }
@@ -86,8 +94,8 @@ export default function App() {
           console.error("Listening user's profile failed:", err);
           setProfileLoading(false);
           setAuthLoading(false);
-          // Standardized error report
-          handleFirestoreError(err, OperationType.GET, `users/${fbUser.uid}`);
+          // Set error instead of crashing the React App
+          setFirestoreError(err.message || String(err));
         });
       }
     });
@@ -100,30 +108,118 @@ export default function App() {
     };
   }, []);
 
+  // 1.5. Protect copyright rights / 禁止右键和复制，特定条件除外
+  useEffect(() => {
+    // Disable right click / contextmenu globally unless targeting writing panels or dedicated forms
+    const handleContextMenu = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      
+      const isCreatorOrForm = 
+        target.closest('#write-page') || 
+        target.closest('#write-post-container') ||
+        target.closest('#onboarding-form') ||
+        target.closest('#settings-form') ||
+        target.closest('.allow-right-click');
+
+      if (isCreatorOrForm) {
+        return;
+      }
+      e.preventDefault();
+    };
+
+    // Disable standard copy operations globally except for the author writer interface or form inputs
+    const handleCopy = (e: ClipboardEvent) => {
+      const target = e.target as HTMLElement;
+      
+      const isCreatorWrite = 
+        target.closest('#write-page') || 
+        target.closest('#write-post-container') ||
+        target.closest('.allow-copy') || 
+        target.tagName === 'INPUT' || 
+        target.tagName === 'TEXTAREA';
+
+      if (!isCreatorWrite) {
+        e.preventDefault();
+      }
+    };
+
+    // Disable paste operations generally, but definitely allow inside inputs and textareas (such as search bar, etc.)
+    const handlePaste = (e: ClipboardEvent) => {
+      const target = e.target as HTMLElement;
+      const isInputOrTextArea = 
+        target.closest('input') || 
+        target.closest('textarea') || 
+        target.closest('[contenteditable="true"]') ||
+        target.closest('#write-page') ||
+        target.closest('#write-post-container') ||
+        target.closest('.allow-paste');
+
+      if (!isInputOrTextArea) {
+        e.preventDefault();
+      }
+    };
+
+    window.addEventListener('contextmenu', handleContextMenu, { capture: true });
+    window.addEventListener('copy', handleCopy, { capture: true });
+    window.addEventListener('paste', handlePaste, { capture: true });
+
+    return () => {
+      window.removeEventListener('contextmenu', handleContextMenu, { capture: true });
+      window.removeEventListener('copy', handleCopy, { capture: true });
+      window.removeEventListener('paste', handlePaste, { capture: true });
+    };
+  }, []);
+
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
 
   const handleLogout = async () => {
     setAuthLoading(true);
     
-    // 1. Clear memory states
-    setUser(null);
-    setFirebaseUser(null);
-    setSelectedPostId(null);
-    setEditingPostId(null);
-    
-    // 2. Perform Firebase client signOut which clears tokens in indexDB
+    // 1. Perform Firebase client signOut
     try {
       await signOut(auth);
     } catch (err) {
       console.error("Firebase sign out error:", err);
     }
+
+    // 2. Clear standard memory states
+    setUser(null);
+    setFirebaseUser(null);
+    setSelectedPostId(null);
+    setEditingPostId(null);
     
-    // 3. Clear session storage
-    localStorage.removeItem('local_mock_user');
+    // 3. Clear localStorage and sessionStorage entirely to purge active states
+    try {
+      localStorage.clear();
+      sessionStorage.clear();
+    } catch (storageErr) {
+      console.error("Error clearing local/session storage:", storageErr);
+    }
+
+    // 4. Forcefully purge IndexedDB databases (especially Firebase & Firestore persistence)
+    try {
+      if (window.indexedDB && typeof window.indexedDB.databases === 'function') {
+        const dbs = await window.indexedDB.databases();
+        for (const dbInfo of dbs) {
+          if (dbInfo.name) {
+            console.log(`Deleting IndexedDB database: ${dbInfo.name}`);
+            window.indexedDB.deleteDatabase(dbInfo.name);
+          }
+        }
+      } else if (window.indexedDB) {
+        // Fallback for browsers or clients without window.indexedDB.databases support
+        window.indexedDB.deleteDatabase('firebaseLocalStorageDb');
+        window.indexedDB.deleteDatabase('firestore/[DEFAULT]/secret-reading/main');
+        window.indexedDB.deleteDatabase('firestore/[DEFAULT]/secret-reading');
+      }
+    } catch (idbErr) {
+      console.error("Error purging IndexedDB databases:", idbErr);
+    }
     
-    // 4. Navigate softly to the clean login screen
+    // 5. Navigate softly to the clean login screen and fully reload to wipe any remaining contexts
     setRoute('login');
     setAuthLoading(false);
+    window.location.reload();
   };
 
   const handleAuthSuccess = () => {
@@ -142,6 +238,101 @@ export default function App() {
 
   // Rendering screen based on state
   const renderContent = () => {
+    if (firestoreError) {
+      return (
+        <div className="max-w-2xl mx-auto px-4 py-12" id="firestore-offline-troubleshooter">
+          <div className="bg-white rounded-3xl p-8 border border-amber-100 shadow-md space-y-6">
+            <div className="flex items-start gap-4">
+              <div className="p-3 bg-amber-50 rounded-2xl text-amber-600">
+                <Shield className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="text-xl font-bold text-gray-900">Firestore 数据库连接受阻</h3>
+                <p className="text-xs font-semibold text-amber-600 mt-1 uppercase tracking-wider font-mono">
+                  Error Code: Client Offline / Network Blocked
+                </p>
+              </div>
+            </div>
+
+            <div className="text-sm text-gray-600 space-y-3 leading-relaxed">
+              <p>
+                已成功通过 Google 账户验证，但在向您的 Firebase Firestore 数据库获取或注册个人轮廓时失败。返回的错误信息为：<br />
+                <code className="block bg-gray-50 border border-gray-100 p-2.5 rounded-lg text-xs font-mono text-rose-600 font-bold overflow-x-auto my-2">
+                  {firestoreError}
+                </code>
+              </p>
+              
+              <div className="space-y-4 border-t border-gray-100 pt-4 mt-4">
+                <h4 className="font-bold text-gray-900">🛠️ 解决此问题的核心自查步骤：</h4>
+                <ol className="list-decimal list-inside space-y-3 text-xs text-gray-500 font-medium">
+                  <li>
+                    <strong className="text-gray-800">确认已在 Firebase 项目中开通 Cloud Firestore：</strong><br />
+                    进入 <a href="https://console.firebase.google.com/" target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">Firebase Console</a> ➔ 选中您的项目 <span className="font-mono bg-zinc-100 px-1 py-0.5 rounded text-zinc-800 font-bold">secret-reading</span> ➔ 点击左侧“Firestore Database” ➔ 点击 “Create database” 创建数据库。数据库 ID 需为默认的 <span className="font-mono bg-zinc-100 px-1 py-0.5 rounded text-zinc-800 font-bold">(default)</span>。
+                  </li>
+                  <li>
+                    <strong className="text-gray-800">检查安全规则 (Rules) 是否处于拒绝状态：</strong><br />
+                    点击 Firestore 里的 “Rules” 标签，确保没有被全盘拒绝。测试及轻量开发时，您可以临时配置为：<br />
+                    <code className="block bg-zinc-50 p-2 rounded text-[11px] font-mono mt-1 text-gray-600 border border-zinc-100 leading-normal">
+                      {"rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /{document=**} {\n      allow read, write: if request.auth != null;\n    }\n  }\n}"}
+                    </code>
+                  </li>
+                  <li>
+                    <strong className="text-gray-800">核对 Authorized Domains (授权域名)：</strong><br />
+                    在 Firebase Console ➔ <strong>Authentication</strong> ➔ <strong>Settings</strong> ➔ <strong>Authorized domains</strong> 下，确保将当前所在的域名 <span className="font-mono bg-zinc-100 px-1 py-0.5 rounded text-zinc-800 font-bold">{window.location.hostname}</span> 与 <span className="font-mono bg-zinc-100 px-1 py-0.5 rounded text-zinc-800 font-bold">ais-pre-qv6cbjsvnatdqixps5cced-1001959589862.asia-southeast1.run.app</span> 添加进去。
+                  </li>
+                </ol>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t border-gray-100">
+              <button
+                onClick={() => {
+                  setFirestoreError(null);
+                  setAuthLoading(true);
+                  // Quick reload trick for profile watcher
+                  const currentFbUser = firebaseUser;
+                  setFirebaseUser(null);
+                  setTimeout(() => {
+                    setFirebaseUser(currentFbUser);
+                  }, 100);
+                }}
+                className="flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-2xl text-xs transition-all shadow-sm shadow-indigo-600/15 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                🔄 重新尝试连接
+              </button>
+              
+              <button
+                onClick={() => {
+                  // Bypass with elegant local sandbox mock user
+                  const mockDevUser: AppUser = {
+                    firebaseUid: firebaseUser?.uid || 'mock-admin-uid',
+                    email: firebaseUser?.email || 'zhoyilee@gmail.com',
+                    username: firebaseUser?.displayName || '特邀体验官 (本地沙盒)',
+                    birthday: '2026-06-22',
+                    avatar: firebaseUser?.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
+                    role: (firebaseUser?.email || '').toLowerCase().trim() === 'zhoyilee@gmail.com' ? 'owner' : 'reader',
+                    createdAt: new Date().toISOString()
+                  };
+                  setUser(mockDevUser);
+                  setFirestoreError(null);
+                  setProfileLoading(false);
+                  setAuthLoading(false);
+                  setRoute('home');
+                }}
+                className="flex-1 py-3 px-4 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-2xl text-xs transition-all border border-emerald-100/60 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                🎮 本地沙盒试用模式 ➔
+              </button>
+            </div>
+            
+            <p className="text-center text-[10px] text-gray-400">
+              💡 提示：本地沙盒模式不依赖任何数据库，您可以直接进入浏览、测试和操作。
+            </p>
+          </div>
+        </div>
+      );
+    }
+
     if (authLoading || profileLoading) {
       return (
         <div className="flex flex-col items-center justify-center min-h-[60vh] text-center" id="app-loading-screen">
@@ -149,6 +340,16 @@ export default function App() {
           <p className="text-sm font-medium text-gray-500">正在进入私密阅读专栏，请稍候...</p>
         </div>
       );
+    }
+
+    // Determine if user requires onboarding setup
+    const needsOnboarding = user && (
+      user.onboarded === false || 
+      (user.onboarded === undefined && (user.username || '').startsWith('读者_'))
+    );
+
+    if (needsOnboarding) {
+      return <Onboarding user={user} onComplete={() => setRoute('home')} />;
     }
 
     switch (route) {
@@ -182,11 +383,15 @@ export default function App() {
   };
 
   const isAuthPage = route === 'login' || route === 'register';
+  const needsOnboarding = user && (
+    user.onboarded === false || 
+    (user.onboarded === undefined && (user.username || '').startsWith('读者_'))
+  );
 
   return (
     <div className="min-h-screen flex flex-col bg-[#fafafa]">
       {/* Dynamic Header / Navigation Bar */}
-      {!isAuthPage && user && (
+      {!isAuthPage && user && !needsOnboarding && (
         <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-md border-b border-gray-100/80 shadow-xs" id="app-nav-bar">
           <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
             {/* Title / Logo */}

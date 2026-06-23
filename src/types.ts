@@ -2,10 +2,11 @@ export interface AppUser {
   firebaseUid: string;
   email: string;
   username: string;
-  birthday: string;
+  birthday?: string;
   avatar: string;
   role: 'reader' | 'author' | 'owner';
   createdAt: string;
+  onboarded?: boolean;
 }
 
 export interface Post {

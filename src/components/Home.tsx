@@ -2,7 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { Post, AppUser } from '../types';
-import { Search, PenTool, LayoutGrid, List, Heart, Calendar, ArrowRight, User as UserIcon, BookOpen, AlertCircle } from 'lucide-react';
+import { Search, PenTool, LayoutGrid, List, Heart, Calendar, ArrowRight, User as UserIcon, BookOpen, AlertCircle, Clipboard, X } from 'lucide-react';
+import { searchMatches } from '../utils/chineseConverter';
+import ImageWrapper from './ImageWrapper';
+import { motion, AnimatePresence } from 'motion/react';
 
 interface HomeProps {
   user: AppUser | null;
@@ -15,34 +18,84 @@ export default function Home({ user, onNavigate, onSelectPost }: HomeProps) {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [indexErrorLink, setIndexErrorLink] = useState<string | null>(null);
+  
+  // Custom dialog paste fallback stats
+  const [showPasteFallback, setShowPasteFallback] = useState(false);
+  const [fallbackPasteText, setFallbackPasteText] = useState('');
+
+  const handlePasteSearch = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        setSearch(text);
+      }
+    } catch (err) {
+      console.warn('Failed to read clipboard during quick paste, showing custom helper overlay:', err);
+      // Clean previous value and show fallback in-app paste modal
+      setFallbackPasteText('');
+      setShowPasteFallback(true);
+    }
+  };
 
   useEffect(() => {
     setLoading(true);
 
     const postsRef = collection(db, 'posts');
-    // Query published articles, sorted by creation date descending
-    const q = query(
+    
+    // In production, we prefer using index-sorted query.
+    // If index doesn't exist yet, we fall back to unsorted query and sort client-side.
+    const qProper = query(
       postsRef,
       where('status', '==', 'published'),
       orderBy('createdAt', 'desc')
     );
 
-    // Dynamic real-time listening
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const loadedPosts = snapshot.docs.map((d) => ({
-        id: d.id,
-        ...d.data(),
-      })) as Post[];
-      setPosts(loadedPosts);
-      setLoading(false);
-    }, (error) => {
-      // Graceful error logging per the System Skill instructions
-      console.error("Firestore loading posts failed:", error);
-      handleFirestoreError(error, OperationType.LIST, 'posts');
-      setLoading(false);
-    });
+    const qFallback = query(
+      postsRef,
+      where('status', '==', 'published')
+    );
 
-    return () => unsubscribe();
+    let unsubscribe: () => void = () => {};
+
+    const startListener = (useFallback: boolean) => {
+      if (unsubscribe) unsubscribe();
+
+      const qToUse = useFallback ? qFallback : qProper;
+
+      unsubscribe = onSnapshot(qToUse, (snapshot) => {
+        const loadedPosts = snapshot.docs.map((d) => ({
+          id: d.id,
+          ...d.data(),
+        })) as Post[];
+
+        if (useFallback) {
+          // Sort client-side
+          loadedPosts.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+        }
+        setPosts(loadedPosts);
+        setLoading(false);
+      }, (error) => {
+        const errorStr = (error.message || String(error)).toLowerCase();
+        if (!useFallback && (errorStr.includes('index') || errorStr.includes('composite') || errorStr.includes('failed-precondition'))) {
+          console.warn("Home component detected missing composite index. Falling back to client-side sorting gracefully...", error);
+          setIndexErrorLink(
+            `https://console.firebase.google.com/v1/r/project/secret-reading/firestore/indexes?create_composite=Ckxwcm9qZWN0cy9zZWNyZXQtcmVhZGluZy9kYXRhYmFzZXMvKGRlZmF1bHQpL2NvbGxlY3Rpb25Hcm91cHMvcG9zdHMvaW5kZXhlcy9fEAEaCgoGc3RhdHVzEAEaDQoJY3JlYXRlZEF0EAIaDAoIX19uYW1lX18QAg`
+          );
+          startListener(true);
+        } else {
+          console.error("Firestore loading posts failed:", error);
+          handleFirestoreError(error, OperationType.LIST, 'posts');
+          setLoading(false);
+        }
+      });
+    };
+
+    startListener(false);
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, []);
 
   const getGreeting = () => {
@@ -54,13 +107,39 @@ export default function Home({ user, onNavigate, onSelectPost }: HomeProps) {
   };
 
   const filteredPosts = posts.filter(post => 
-    post.title.toLowerCase().includes(search.toLowerCase()) ||
-    post.authorName.toLowerCase().includes(search.toLowerCase()) ||
-    post.content.toLowerCase().includes(search.toLowerCase())
+    searchMatches(search, post.title) ||
+    searchMatches(search, post.authorName) ||
+    searchMatches(search, post.content)
   );
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
+      {indexErrorLink && (
+        <div className="mb-6 p-4 bg-amber-50 rounded-2xl border border-amber-200 shadow-sm" id="composite-index-tip">
+          <div className="flex gap-3">
+            <AlertCircle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <h4 className="text-sm font-bold text-gray-900">⚠️ 发现数据库查询索引缺失</h4>
+              <p className="text-xs text-gray-600 leading-relaxed font-sans">
+                当前列表页面使用了多重条件（<code className="bg-amber-100/50 px-1 py-0.5 rounded font-bold font-mono">status</code> 筛选 与 <code className="bg-amber-100/50 px-1 py-0.5 rounded font-bold font-mono">createdAt</code> 倒序排列），这在 Firebase 中需要对应的复合索引才可运行。
+                <br />
+                <strong>🎉 应用程序已自动降级为“本地备用排序模式”，服务当前完全正常！</strong>但如需更完美地优化生产级性能：
+              </p>
+              <div className="pt-2">
+                <a
+                  href={indexErrorLink}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg text-[10px] transition-colors cursor-pointer"
+                >
+                  ⚡ 一键点此在您的 Firebase Console 自动创建此索引
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Greetings area */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8 bg-gradient-to-r from-indigo-50/60 to-purple-50/20 p-6 rounded-2xl border border-indigo-100/30">
         <div>
@@ -94,8 +173,16 @@ export default function Home({ user, onNavigate, onSelectPost }: HomeProps) {
             placeholder="搜索文章标题、正文、作者..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-white border border-gray-200 rounded-xl py-2 pl-9 pr-4 text-xs text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-all shadow-sm"
+            className="allow-paste w-full bg-white border border-gray-200 rounded-xl py-2 pl-9 pr-20 text-xs text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-all shadow-sm"
           />
+          <button
+            onClick={handlePasteSearch}
+            className="allow-paste absolute inset-y-1.5 right-1.5 px-2.5 bg-gray-50 hover:bg-indigo-50 hover:text-indigo-600 rounded-lg text-[10px] font-semibold text-gray-400 border border-gray-150 transition-all flex items-center gap-1 cursor-pointer select-none"
+            title="快捷粘贴剪贴板内容"
+          >
+            <Clipboard className="h-3 w-3" />
+            <span>粘贴</span>
+          </button>
         </div>
 
         <div className="flex items-center gap-2 bg-gray-100 p-1 rounded-xl self-end sm:self-auto shadow-inner">
@@ -155,10 +242,12 @@ export default function Home({ user, onNavigate, onSelectPost }: HomeProps) {
               >
                 {/* Image Section */}
                 <div className={`relative overflow-hidden shrink-0 ${viewMode === 'grid' ? 'aspect-video w-full' : 'w-1/3 sm:w-1/4 h-full'}`}>
-                  <img
+                  <ImageWrapper
                     src={coverImage}
                     alt={post.title}
+                    width={500}
                     className="w-full h-full object-cover transition-transform duration-500 hover:scale-105"
+                    placeholderClassName="w-full h-full"
                   />
                   {post.status === 'draft' && (
                     <span className="absolute top-2 left-2 bg-yellow-400 text-yellow-950 text-[10px] px-2 py-0.5 rounded-full font-bold">
@@ -201,6 +290,87 @@ export default function Home({ user, onNavigate, onSelectPost }: HomeProps) {
           })}
         </div>
       )}
+
+      {/* Fallback Paste Modal */}
+      <AnimatePresence>
+        {showPasteFallback && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
+            onClick={() => setShowPasteFallback(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 15 }}
+              className="bg-white rounded-2xl p-6 max-w-sm w-full border border-gray-100 shadow-2xl space-y-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-indigo-50 rounded-lg text-indigo-600">
+                    <Clipboard className="h-4 w-4" />
+                  </div>
+                  <h3 className="text-sm font-bold text-gray-900">安全快捷粘贴</h3>
+                </div>
+                <button
+                  onClick={() => setShowPasteFallback(false)}
+                  className="p-1 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-600 transition-colors cursor-pointer"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-xs text-gray-500 leading-relaxed">
+                  当前处于网页沙盒预览状态下，因浏览器的安全政策限制，我们无法直接用程序自动读取您的本地剪贴板。
+                </p>
+                <div className="p-2.5 bg-indigo-50/60 rounded-xl border border-indigo-100/50 text-[11px] text-indigo-800 leading-normal">
+                  💡 <strong>提示：</strong>请点击下方输入框获得焦点，然后按键盘快捷键 <strong className="font-mono">Ctrl+V</strong> (或者苹果系统的 <strong className="font-mono">⌘+V</strong>) 粘贴，确认即搜索：
+                </div>
+              </div>
+
+              <input
+                type="text"
+                autoFocus
+                value={fallbackPasteText}
+                onChange={(e) => setFallbackPasteText(e.target.value)}
+                placeholder="在此框按 Ctrl+V 粘贴..."
+                className="allow-paste allow-right-click w-full bg-gray-50 border border-gray-205 rounded-xl py-2.5 px-3.5 text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 transition-all font-sans font-medium"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    setSearch(fallbackPasteText);
+                    setShowPasteFallback(false);
+                  }
+                }}
+              />
+
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPasteFallback(false)}
+                  className="flex-1 py-2 rounded-xl text-xs font-semibold text-gray-500 hover:bg-gray-100 border border-transparent transition-colors cursor-pointer"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  disabled={!fallbackPasteText.trim()}
+                  onClick={() => {
+                    setSearch(fallbackPasteText);
+                    setShowPasteFallback(false);
+                  }}
+                  className="flex-1 py-2 rounded-xl text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:pointer-events-none transition-colors shadow-2xs cursor-pointer"
+                >
+                  确定并搜索
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

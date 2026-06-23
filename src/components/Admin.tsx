@@ -17,6 +17,14 @@ export default function Admin({ user, onNavigate, onSelectPost }: AdminProps) {
   const [loadingPosts, setLoadingPosts] = useState(true);
   const [activeTab, setActiveTab] = useState<'users' | 'posts'>('users');
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [dialogLoading, setDialogLoading] = useState(false);
+  const [adminDialog, setAdminDialog] = useState<{
+    show: boolean;
+    type: 'confirm_role' | 'confirm_delete' | 'info' | 'success' | 'error';
+    title: string;
+    message: string;
+    onConfirm?: () => Promise<void> | void;
+  }>({ show: false, type: 'info', title: '', message: '' });
 
   // Verify access: Owner role only
   const isOwner = user && (user.role === 'owner' || user.email === 'zhoyilee@gmail.com');
@@ -71,50 +79,86 @@ export default function Admin({ user, onNavigate, onSelectPost }: AdminProps) {
 
   const handleRoleToggle = async (targetUser: AppUser) => {
     if (targetUser.email === 'zhoyilee@gmail.com') {
-      alert("站长主管理员 (Bootstrap Owner) 的权限不能被降级或修改");
+      setAdminDialog({
+        show: true,
+        type: 'info',
+        title: "无法修改权限",
+        message: "站长主管理员 (Bootstrap Owner) 的权限属于终生默认拥有，不提供降级或修改。"
+      });
       return;
     }
 
     const nextRole = targetUser.role === 'reader' ? 'author' : 'reader';
-    if (!confirm(`确定要将用户「${targetUser.username}」的权限从 ${targetUser.role} 修改为 ${nextRole} 吗？`)) {
-      return;
-    }
-
-    try {
-      const userRef = doc(db, 'users', targetUser.firebaseUid);
-      
-      try {
-        await updateDoc(userRef, { role: nextRole });
-      } catch (fError) {
-        handleFirestoreError(fError, OperationType.UPDATE, `users/${targetUser.firebaseUid}`);
+    
+    setAdminDialog({
+      show: true,
+      type: 'confirm_role',
+      title: "改变用户权限",
+      message: `确定要将用户「${targetUser.username}」的权限从 ${targetUser.role} 修改为 ${nextRole} 吗？\n这将实时同步他的前台访问和发文撰写权力。`,
+      onConfirm: async () => {
+        setDialogLoading(true);
+        try {
+          const userRef = doc(db, 'users', targetUser.firebaseUid);
+          try {
+            await updateDoc(userRef, { role: nextRole });
+          } catch (fError) {
+            handleFirestoreError(fError, OperationType.UPDATE, `users/${targetUser.firebaseUid}`);
+          }
+          setAdminDialog({
+            show: true,
+            type: 'success',
+            title: "修改成功",
+            message: `用户「${targetUser.username}」已成功配置为 ${nextRole} 级别角色。`
+          });
+        } catch (err: any) {
+          console.error("Failed to modify role:", err);
+          setAdminDialog({
+            show: true,
+            type: 'error',
+            title: "修改失败",
+            message: "操作过程中报错：" + (err.message || String(err))
+          });
+        } finally {
+          setDialogLoading(false);
+        }
       }
-
-      alert("权限更新成功！");
-    } catch (err: any) {
-      console.error("Failed to modify role:", err);
-      alert("修改失败: " + err.message);
-    }
+    });
   };
 
   const handlePostDelete = async (post: Post) => {
-    if (!confirm(`确定要永久删除博文「${post.title}」（作者: ${post.authorName}）吗？删除后不可恢复。`)) {
-      return;
-    }
-
-    try {
-      const postRef = doc(db, 'posts', post.id);
-      
-      try {
-        await deleteDoc(postRef);
-      } catch (fError) {
-        handleFirestoreError(fError, OperationType.DELETE, `posts/${post.id}`);
+    setAdminDialog({
+      show: true,
+      type: 'confirm_delete',
+      title: "确认删除博文",
+      message: `确定要永久删除博文「${post.title}」（作者: ${post.authorName}）吗？删除后在数据库里将永久不可恢复。`,
+      onConfirm: async () => {
+        setDialogLoading(true);
+        try {
+          const postRef = doc(db, 'posts', post.id);
+          try {
+            await deleteDoc(postRef);
+          } catch (fError) {
+            handleFirestoreError(fError, OperationType.DELETE, `posts/${post.id}`);
+          }
+          setAdminDialog({
+            show: true,
+            type: 'success',
+            title: "文章已删除",
+            message: "该文章已经在数据库及前端列表中彻底清空。"
+          });
+        } catch (err: any) {
+          console.error("Failed to delete post from panel:", err);
+          setAdminDialog({
+            show: true,
+            type: 'error',
+            title: "删除失败",
+            message: "操作过程中报错：" + (err.message || String(err))
+          });
+        } finally {
+          setDialogLoading(false);
+        }
       }
-
-      alert("文章已被成功删除");
-    } catch (err: any) {
-      console.error("Failed to delete post from panel:", err);
-      alert("删除失败: " + err.message);
-    }
+    });
   };
 
   // Safe Guard checks
@@ -197,7 +241,6 @@ export default function Admin({ user, onNavigate, onSelectPost }: AdminProps) {
                   <th className="py-4 px-6">用户名 & 头像</th>
                   <th className="py-4 px-6">电子邮箱</th>
                   <th className="py-4 px-6">当前角色</th>
-                  <th className="py-4 px-6">生日</th>
                   <th className="py-4 px-6">注册日期</th>
                   <th className="py-4 px-6 text-right">角色变动操作</th>
                 </tr>
@@ -224,7 +267,6 @@ export default function Admin({ user, onNavigate, onSelectPost }: AdminProps) {
                          target.role === 'author' ? '签约作家' : '普通读者'}
                       </span>
                     </td>
-                    <td className="py-4 px-6 text-gray-500">{target.birthday || '未设置'}</td>
                     <td className="py-4 px-6 text-gray-400 font-mono text-xs">
                       {new Date(target.createdAt).toLocaleDateString()}
                     </td>
@@ -316,6 +358,94 @@ export default function Admin({ user, onNavigate, onSelectPost }: AdminProps) {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Dynamic Unified Admin Dialog Overlay */}
+      {adminDialog.show && (
+        <div className="fixed inset-0 bg-zinc-950/45 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in" id="admin-unified-dialog">
+          <div className="bg-white rounded-3xl max-w-md w-full border border-gray-100 p-6 sm:p-8 shadow-2xl space-y-6">
+            <div className="flex items-start gap-4">
+              <div className={`p-3 rounded-2xl ${
+                adminDialog.type === 'confirm_delete' || adminDialog.type === 'error'
+                  ? 'bg-rose-50 text-rose-600'
+                  : adminDialog.type === 'success' 
+                    ? 'bg-emerald-50 text-emerald-600'
+                    : adminDialog.type === 'confirm_role'
+                      ? 'bg-indigo-50 text-indigo-600'
+                      : 'bg-amber-50 text-amber-600'
+              }`}>
+                {adminDialog.type === 'confirm_delete' && <Trash2 className="h-6 w-6" />}
+                {adminDialog.type === 'error' && <ShieldAlert className="h-6 w-6" />}
+                {adminDialog.type === 'success' && <Shield className="h-6 w-6 animate-pulse" />}
+                {adminDialog.type === 'confirm_role' && <KeyRound className="h-6 w-6" />}
+                {adminDialog.type === 'info' && <ShieldAlert className="h-6 w-6" />}
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-lg font-bold text-gray-900 font-display">{adminDialog.title}</h3>
+                <p className="text-[10px] text-gray-400 uppercase font-mono font-bold tracking-wider">
+                  {adminDialog.type.toUpperCase()}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs leading-relaxed text-gray-400 whitespace-pre-wrap">
+              {adminDialog.message}
+            </p>
+
+            <div className="flex gap-3 pt-2">
+              {/* Only show 'Cancel' for confirmation dialog types */}
+              {(adminDialog.type === 'confirm_role' || adminDialog.type === 'confirm_delete') ? (
+                <>
+                  <button
+                    type="button"
+                    disabled={dialogLoading}
+                    onClick={() => setAdminDialog({ ...adminDialog, show: false })}
+                    className="flex-1 py-3 px-4 bg-gray-50 hover:bg-gray-100 text-gray-700 font-bold rounded-2xl text-xs transition-colors border border-gray-100 flex items-center justify-center cursor-pointer disabled:opacity-50"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    disabled={dialogLoading}
+                    onClick={async () => {
+                      if (adminDialog.onConfirm) {
+                        await adminDialog.onConfirm();
+                      }
+                    }}
+                    className={`flex-1 py-3 px-4 font-bold rounded-2xl text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-md disabled:opacity-50 ${
+                      adminDialog.type === 'confirm_delete'
+                        ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-rose-600/10'
+                        : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-600/10'
+                    }`}
+                  >
+                    {dialogLoading ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        正在执行...
+                      </>
+                    ) : (
+                      <>
+                        {adminDialog.type === 'confirm_delete' ? <Trash2 className="h-3.5 w-3.5" /> : <KeyRound className="h-3.5 w-3.5" />}
+                        确认执行
+                      </>
+                    )}
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAdminDialog({ ...adminDialog, show: false });
+                    setRefreshTrigger(prev => prev + 1); // Auto reload list state
+                  }}
+                  className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-2xl text-xs transition-colors shadow-md shadow-indigo-600/10 flex items-center justify-center cursor-pointer"
+                >
+                  我知道了
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}

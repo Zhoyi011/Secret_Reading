@@ -95,10 +95,6 @@ export default function Profile({ user, onNavigate, onSelectPost, onEditPost }: 
 
           <p className="text-gray-400 text-xs flex items-center justify-center md:justify-start gap-3">
             <span className="flex items-center gap-1">
-              <Calendar className="h-3.5 w-3.5" />
-              生日: {user.birthday || '未填'}
-            </span>
-            <span className="flex items-center gap-1">
               <Clock className="h-3.5 w-3.5" />
               加入于: {new Date(user.createdAt).toLocaleDateString()}
             </span>

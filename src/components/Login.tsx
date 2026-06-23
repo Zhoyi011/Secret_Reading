@@ -52,7 +52,14 @@ export default function Login({ onNavigate, onSuccess }: LoginProps) {
     } catch (err: any) {
       console.error("Google sign in failed:", err);
       let errMsg = "谷歌登录失败，请重试";
-      if (err.code === 'auth/operation-not-allowed') {
+      const errorStr = (err.code || '') + ' ' + (err.message || '');
+      
+      if (errorStr.includes('auth/unauthorized-domain') || errorStr.includes('unauthorized-domain')) {
+        const currentDomain = window.location.hostname;
+        errMsg = `【网域授权未配置】\n由于您切换了自定义 Firebase 项目，您必须允许当前域名访问您的 Firebase Authentication 接口。\n\n请前往 Firebase Console 控制台：\n1. 点击左侧进入 "Authentication" (身份验证)\n2. 点击 "Settings" (设置) 选项卡\n3. 在左栏中选择 "Authorized domains" (授权网域) -> 点击 "Add domain" (添加网域)\n4. 将以下本部署平台域名添加进去：\n👉 ${currentDomain}\n👉 ais-pre-qv6cbjsvnatdqixps5cced-1001959589862.asia-southeast1.run.app\n\n添加完成后刷新此页面，即可成功通过 Google SSO 验证登录！`;
+      } else if (errorStr.includes('the client is offline') || errorStr.includes('offline')) {
+        errMsg = `【数据库读取受阻（或处于离线/未初始化状态）】\n已成功连接 Google 账户验证，但在尝试请求您的 Cloud Firestore 数据库时返回“客户端离线/无法建立连接”错误。\n\n请执行以下自查步骤：\n1. 确保在您的 Firebase 控制台中已激活 "Firestore Database" 的默认数据库（ID 为 (default)）。\n2. 前往 Firestore "Rules" (安全规则) 界面，确认当前读写规则是否允许已验证的用户录入数据（例如设置：allow read, write: if request.auth != null;）。\n3. 确保本地网络没有代理拦截对 firestore.googleapis.com 结点的通信。`;
+      } else if (err.code === 'auth/operation-not-allowed') {
         errMsg = "Google 登录方式在您的 Firebase 控制台中尚未启用。请通知管理员在 Firebase Console ➔ Authentication ➔ Sign-in method 里启用 Google 选项。";
       } else if (err.code === 'auth/popup-blocked') {
         errMsg = "登录窗口被浏览器拦截，请允许弹窗后重试";

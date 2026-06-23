@@ -1,5 +1,6 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
+import ImageWrapper from './ImageWrapper';
 
 interface MarkdownRendererProps {
   content: string;
@@ -12,11 +13,11 @@ export default function MarkdownRenderer({ content }: MarkdownRendererProps) {
         components={{
           img: ({ node, ...props }) => (
             <span className="block my-6 text-center">
-              <img
-                {...props}
+              <ImageWrapper
+                src={props.src || ''}
+                alt={props.alt || ''}
                 className="mx-auto rounded-2xl max-w-full h-auto object-contain shadow-xs border border-gray-150/80 max-h-[550px] transition-all hover:shadow-sm"
-                loading="lazy"
-                referrerPolicy="no-referrer"
+                placeholderClassName="mx-auto rounded-2xl max-w-full h-48 max-h-[550px]"
                 style={{ imageRendering: 'auto' }}
               />
               {props.alt && (

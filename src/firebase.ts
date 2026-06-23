@@ -1,10 +1,24 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
-import firebaseConfig from '../firebase-applet-config.json';
+import firebaseConfigDefault from '../firebase-applet-config.json';
 
-const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+// Support custom configuration via VITE_ environment variables with fallback to user's custom project keys
+const env = (import.meta as any).env || {};
+const customConfig = {
+  apiKey: env.VITE_FIREBASE_API_KEY || "AIzaSyDt-JP_yIy2amy_SJjpV7RawDf8yR9wLmw",
+  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || "secret-reading.firebaseapp.com",
+  projectId: env.VITE_FIREBASE_PROJECT_ID || "secret-reading",
+  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || "secret-reading.firebasestorage.app",
+  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || "1071172219377",
+  appId: env.VITE_FIREBASE_APP_ID || "1:1071172219377:web:7998d9fb76bbb9303f1450",
+  measurementId: env.VITE_FIREBASE_MEASUREMENT_ID || "G-ZTVQP3G9YX",
+  firestoreDatabaseId: env.VITE_FIREBASE_DATABASE_ID || "(default)"
+};
+
+const app = initializeApp(customConfig);
+const dbId = customConfig.firestoreDatabaseId && customConfig.firestoreDatabaseId !== "(default)" ? customConfig.firestoreDatabaseId : undefined;
+export const db = dbId ? getFirestore(app, dbId) : getFirestore(app);
 export const auth = getAuth(app);
 
 // Connectivity testing requirement from Firebase Integration Skill:
