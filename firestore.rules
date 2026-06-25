@@ -23,7 +23,7 @@ service cloud.firestore {
       return isSignedIn() && (
         request.auth.token.email == 'zhoyilee@gmail.com' ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         getUser(request.auth.uid).data.role == 'owner')
+         getUser(request.auth.uid).data.get('role', 'reader') == 'owner')
       );
     }
 
@@ -32,8 +32,8 @@ service cloud.firestore {
       return isSignedIn() && (
         request.auth.token.email == 'zhoyilee@gmail.com' ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
-          getUser(request.auth.uid).data.role == 'author' ||
-          getUser(request.auth.uid).data.role == 'owner'
+          getUser(request.auth.uid).data.get('role', 'reader') == 'author' ||
+          getUser(request.auth.uid).data.get('role', 'reader') == 'owner'
         ))
       );
     }
@@ -45,16 +45,16 @@ service cloud.firestore {
       // Users can create their own profile during registration
       // If the email is bootstrap admin, they can become owner, otherwise they must start as reader
       allow create: if isSignedIn() && request.auth.uid == userId && (
-        (request.resource.data.email == 'zhoyilee@gmail.com' && request.resource.data.role == 'owner') ||
-        (request.resource.data.email != 'zhoyilee@gmail.com' && request.resource.data.role == 'reader')
+        (request.resource.data.get('email', '') == 'zhoyilee@gmail.com' && request.resource.data.get('role', 'reader') == 'owner') ||
+        (request.resource.data.get('email', '') != 'zhoyilee@gmail.com' && request.resource.data.get('role', 'reader') == 'reader')
       );
 
       // Only the owner can update any user's role
       // Users themselves can update other profile details, but NOT their role
-      allow update: if isOwner() || (
+      allow update: if (
         isSignedIn() && request.auth.uid == userId &&
-        request.resource.data.role == resource.data.role
-      );
+        (request.resource.data.get('role', 'reader') == resource.data.get('role', 'reader'))
+      ) || isOwner();
 
       allow delete: if isOwner();
     }
@@ -92,6 +92,45 @@ service cloud.firestore {
 
       // Only the owner can delete any post. Authors can also delete their own draft/posts
       allow delete: if isOwner() || (isSignedIn() && resource.data.authorId == request.auth.uid);
+    }
+
+    match /follows/{followId} {
+      // Anyone signed in can read follow relations
+      allow read: if isSignedIn();
+
+      // Only the follower themselves can create/remove follow records
+      allow create: if isSignedIn() && request.resource.data.followerId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.followerId == request.auth.uid;
+      allow update: if false;
+    }
+
+    match /notifications/{notificationId} {
+      // Users can read and delete their own notifications
+      allow read: if isSignedIn() && resource.data.recipientId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.recipientId == request.auth.uid;
+
+      // Any signed-in user can create a notification (e.g. for follows, likes, or new posts)
+      // provided the senderId matches their auth UID
+      allow create: if isSignedIn() && request.resource.data.senderId == request.auth.uid;
+
+      // Users can mark their own notifications as read
+      allow update: if isSignedIn() && 
+                    resource.data.recipientId == request.auth.uid && 
+                    request.resource.data.read == true && 
+                    request.resource.data.recipientId == resource.data.recipientId &&
+                    request.resource.data.senderId == resource.data.senderId;
+    }
+
+    match /author_applications/{appId} {
+      allow read: if isSignedIn() && (request.auth.uid == appId || isOwner());
+      allow create: if isSignedIn() && request.auth.uid == appId;
+      allow update: if isOwner() || (isSignedIn() && request.auth.uid == appId);
+      allow delete: if isOwner();
+    }
+
+    match /reports/{reportId} {
+      allow create: if isSignedIn();
+      allow read, update, delete: if isOwner();
     }
   }
 }

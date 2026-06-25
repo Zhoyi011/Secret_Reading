@@ -1,36 +1,81 @@
 import React, { useState, useRef } from 'react';
 import { Upload, Image as ImageIcon, Loader2, AlertCircle } from 'lucide-react';
+import ImageCropper from './ImageCropper';
+import { safeLocalStorage } from '../utils/safeStorage';
 
 interface ImageUploaderProps {
   onUploadSuccess: (url: string) => void;
   label?: string;
   className?: string;
+  enableCrop?: boolean;
 }
 
-export default function ImageUploader({ onUploadSuccess, label = "上传图片", className = "" }: ImageUploaderProps) {
+export default function ImageUploader({ 
+  onUploadSuccess, 
+  label = "上传图片", 
+  className = "", 
+  enableCrop = true 
+}: ImageUploaderProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [base64ToCrop, setBase64ToCrop] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const getCloudinaryConfig = () => {
-    const cloudName = localStorage.getItem('CLOUDINARY_CLOUD_NAME') || '';
-    const uploadPreset = localStorage.getItem('CLOUDINARY_UPLOAD_PRESET') || '';
+    const cloudName = safeLocalStorage.getItem('CLOUDINARY_CLOUD_NAME') || '';
+    const uploadPreset = safeLocalStorage.getItem('CLOUDINARY_UPLOAD_PRESET') || '';
     return { cloudName, uploadPreset };
   };
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    await uploadFile(file);
+  // Helper to reconstruct file from cropped Base64
+  const dataURLtoFile = (dataurl: string, filename: string): File => {
+    const arr = dataurl.split(',');
+    const mimeMatch = arr[0].match(/:(.*?);/);
+    const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new File([u8arr], filename, { type: mime });
   };
 
-  const uploadFile = async (file: File) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    processSelectedFile(file);
+  };
+
+  const processSelectedFile = (file: File) => {
     // Validate file size (under 10MB)
     if (file.size > 10 * 1024 * 1024) {
       setError("图片文件大小不能超过 10MB");
       return;
     }
 
+    setError(null);
+
+    if (enableCrop) {
+      // Load the selected file as Base64 to supply to the cropper
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        if (typeof reader.result === 'string') {
+          setBase64ToCrop(reader.result);
+        } else {
+          setError("读取图片失败");
+        }
+      };
+      reader.onerror = () => {
+        setError("无法打开该图片");
+      };
+      reader.readAsDataURL(file);
+    } else {
+      uploadFile(file);
+    }
+  };
+
+  const uploadFile = async (file: File) => {
     setLoading(true);
     setError(null);
 
@@ -64,6 +109,8 @@ export default function ImageUploader({ onUploadSuccess, label = "上传图片",
         setError(err.message || "上传到 Cloudinary 失败，已启用本地 Base64 备用方案");
         // Fallback to Base64 so the application stays fully functional!
         fallbackToBase64(file);
+      } finally {
+        setLoading(false);
       }
     } else {
       // Direct Local fallback to Base64 string (meaningful, no mock data, fully functional out-of-the-box!)
@@ -93,12 +140,17 @@ export default function ImageUploader({ onUploadSuccess, label = "上传图片",
     e.preventDefault();
   };
 
-  const onDrop = async (e: React.DragEvent) => {
+  const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     const file = e.dataTransfer.files?.[0];
     if (file && file.type.startsWith('image/')) {
-      await uploadFile(file);
+      processSelectedFile(file);
     }
+  };
+
+  const handleCropComplete = (croppedBase64: string) => {
+    setBase64ToCrop(null);
+    onUploadSuccess(croppedBase64);
   };
 
   return (
@@ -132,7 +184,7 @@ export default function ImageUploader({ onUploadSuccess, label = "上传图片",
               点击或拖拽图片到这里上传
             </p>
             <p className="text-xs text-gray-400">
-              支持 PNG, JPG, GIF 等类型，最大 10MB
+              支持 PNG, JPG, GIF 等类型，可在此处裁剪，最大 10MB
             </p>
           </div>
         )}
@@ -143,6 +195,15 @@ export default function ImageUploader({ onUploadSuccess, label = "上传图片",
           <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
           <span>{error}</span>
         </div>
+      )}
+
+      {/* Render the Cropper modal over the screen when an image has been chosen */}
+      {base64ToCrop && (
+        <ImageCropper
+          imageSrc={base64ToCrop}
+          onCropComplete={handleCropComplete}
+          onCancel={() => setBase64ToCrop(null)}
+        />
       )}
     </div>
   );

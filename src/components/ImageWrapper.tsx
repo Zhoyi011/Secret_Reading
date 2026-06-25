@@ -12,6 +12,7 @@ interface ImageWrapperProps extends React.ImgHTMLAttributes<HTMLImageElement> {
   crop?: 'fill' | 'scale' | 'fit' | 'thumb';
   placeholderClassName?: string;
   enableLightbox?: boolean;
+  isR18?: boolean;
 }
 
 /**
@@ -118,6 +119,7 @@ export default function ImageWrapper({
   crop = 'fill',
   placeholderClassName = '',
   enableLightbox = true,
+  isR18 = false,
   style,
   ...rest
 }: ImageWrapperProps) {

@@ -89,6 +89,72 @@
         }
       },
       "required": ["title", "content", "authorId", "authorName", "status", "createdAt", "updatedAt"]
+    },
+    "Follow": {
+      "title": "User Follow Relationship",
+      "description": "Indicates when a user follows another user",
+      "type": "object",
+      "properties": {
+        "followerId": { "type": "string", "description": "The UID of the user who followed" },
+        "followerName": { "type": "string", "description": "Display name of follower" },
+        "followerAvatar": { "type": "string", "description": "Avatar of follower" },
+        "followingId": { "type": "string", "description": "The UID of the user being followed" },
+        "followingName": { "type": "string", "description": "Display name of following user" },
+        "followingAvatar": { "type": "string", "description": "Avatar of following user" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Follow timestamp" }
+      },
+      "required": ["followerId", "followerName", "followerAvatar", "followingId", "followingName", "followingAvatar", "createdAt"]
+    },
+    "Notification": {
+      "title": "System / Interpersonal Notification",
+      "description": "A notification pushed to a user",
+      "type": "object",
+      "properties": {
+        "recipientId": { "type": "string", "description": "The UID of the user who receives the notification" },
+        "senderId": { "type": "string", "description": "The UID of the user who triggered the notification" },
+        "senderName": { "type": "string", "description": "Display name of sender" },
+        "senderAvatar": { "type": "string", "description": "Avatar of sender" },
+        "type": { "type": "string", "enum": ["new_post", "follow", "like", "system"], "description": "Categorization of notification type" },
+        "title": { "type": "string", "description": "Brief notification title" },
+        "body": { "type": "string", "description": "Notification body details" },
+        "postId": { "type": "string", "description": "Optional related post UID" },
+        "postTitle": { "type": "string", "description": "Optional related post title" },
+        "read": { "type": "boolean", "description": "Read / Unread status flag" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" }
+      },
+      "required": ["recipientId", "senderId", "senderName", "type", "title", "body", "read", "createdAt"]
+    },
+    "Report": {
+      "title": "Abuse / Content Report",
+      "description": "A user-submitted abuse report against an article",
+      "type": "object",
+      "properties": {
+        "postId": { "type": "string", "description": "ID of the reported post" },
+        "postTitle": { "type": "string", "description": "Title of the reported post" },
+        "reporterId": { "type": "string", "description": "UID of the reporter" },
+        "reporterName": { "type": "string", "description": "Name of the reporter" },
+        "reason": { "type": "string", "enum": ["引战", "R18内容但无加入R18标签", "非R18博文图片带有R18图片"], "description": "Primary report reason" },
+        "details": { "type": "string", "description": "Detailed description of violation" },
+        "status": { "type": "string", "enum": ["pending", "resolved", "invalid"], "description": "Report handling status" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp when report was filed" }
+      },
+      "required": ["postId", "postTitle", "reporterId", "reporterName", "reason", "status", "createdAt"]
+    },
+    "AuthorApplication": {
+      "title": "Author Qualification Application",
+      "description": "An application submitted by a reader to become an author",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "The UID of the applicant" },
+        "username": { "type": "string", "description": "Display name of applicant" },
+        "email": { "type": "string", "format": "email", "description": "Email address of applicant" },
+        "bio": { "type": "string", "description": "Applicant bio or reason" },
+        "sampleContent": { "type": "string", "description": "Self-introduction or prior works" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"], "description": "Review status" },
+        "rejectReason": { "type": "string", "description": "Optional reason for rejection" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Application submission timestamp" }
+      },
+      "required": ["userId", "username", "email", "bio", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -99,6 +165,22 @@
     "posts/{postId}": {
       "schema": "Post",
       "description": "Articles and drafts"
+    },
+    "follows/{followId}": {
+      "schema": "Follow",
+      "description": "User follow records"
+    },
+    "notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "Pushed alerts and notifications"
+    },
+    "reports/{reportId}": {
+      "schema": "Report",
+      "description": "User filed abuse/content reports"
+    },
+    "author_applications/{appId}": {
+      "schema": "AuthorApplication",
+      "description": "Applications to become an author"
     }
   }
 }

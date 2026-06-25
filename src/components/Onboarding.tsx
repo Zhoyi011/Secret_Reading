@@ -13,7 +13,8 @@ import {
   ArrowLeft, 
   Loader2, 
   CheckCircle,
-  Smile
+  Smile,
+  Calendar
 } from 'lucide-react';
 import { mongoClient } from '../lib/mongoClient';
 
@@ -37,7 +38,14 @@ export default function Onboarding({ user, onComplete }: OnboardingProps) {
 
   // Profile Form States initialized with existing firebase SSO details if available
   const [username, setUsername] = useState(user.username || '');
-  const [avatar, setAvatar] = useState(user.avatar || PRESET_AVATARS[0]);
+  const [birthday, setBirthday] = useState(user.birthday || '');
+  const [avatar, setAvatar] = useState(user.avatar || '');
+  const [hasUploadedAvatar, setHasUploadedAvatar] = useState(() => {
+    if (user.avatar && !user.avatar.includes('unsplash.com/photo-1534528741775-53994a69daeb')) {
+      return true;
+    }
+    return false;
+  });
   
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +64,11 @@ export default function Onboarding({ user, onComplete }: OnboardingProps) {
 
   const handleSubmit = async () => {
     if (!username.trim()) {
-      setError("请填写一个您中意的用户名/显示昵称");
+      setError("请填写一个您中意的用户名/显示昵称（必填）");
+      return;
+    }
+    if (!avatar || !hasUploadedAvatar) {
+      setError("请通过下方的上传器裁剪并上传您的个性化头像（必须）");
       return;
     }
 
@@ -68,7 +80,7 @@ export default function Onboarding({ user, onComplete }: OnboardingProps) {
       const userRef = doc(db, 'users', user.firebaseUid);
       const updatePayload = {
         username: username.trim(),
-        birthday: '',
+        birthday: birthday || '',
         avatar: avatar,
         onboarded: true, // Mark user as fully onboarded
       };
@@ -79,7 +91,7 @@ export default function Onboarding({ user, onComplete }: OnboardingProps) {
       try {
         mongoClient.saveUserSettings(user.firebaseUid, {
           username: username.trim(),
-          birthday: '',
+          birthday: birthday,
           avatar: avatar,
           email: user.email,
           role: user.role
@@ -250,35 +262,57 @@ export default function Onboarding({ user, onComplete }: OnboardingProps) {
               <div className="space-y-1.5">
                 <label className="text-[11px] font-bold text-gray-700 flex items-center gap-1.5">
                   <User className="h-3.5 w-3.5 text-indigo-500" />
-                  <span>显示笔名 / 用户名</span>
+                  <span>显示笔名 / 用户名 <span className="text-rose-500 font-bold">*必填</span></span>
                 </label>
                 <input
                   type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="请输入可公开的显示笔名"
+                  placeholder="请输入您的社区显示笔名 / 用户昵称"
                   maxLength={24}
                   required
                   className="block w-full rounded-xl border border-gray-200 py-2.5 px-3.5 text-xs text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 transition-all font-sans font-medium"
                 />
               </div>
 
+              {/* Birthday Input Field */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-gray-700 flex items-center gap-1.5">
+                  <Calendar className="h-3.5 w-3.5 text-indigo-500" />
+                  <span>出生日期 / 生日 <span className="text-gray-400 font-normal">（选填）</span></span>
+                </label>
+                <input
+                  type="date"
+                  value={birthday}
+                  onChange={(e) => setBirthday(e.target.value)}
+                  className="block w-full rounded-xl border border-gray-200 py-2.5 px-3.5 text-xs text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 transition-all font-sans font-medium"
+                />
+              </div>
+
               {/* Avatar Preset List Selector */}
               <div className="space-y-2">
-                <label className="block text-[11px] font-bold text-gray-700">推荐高级头像 / Preset Avatars</label>
+                <label className="block text-[11px] font-bold text-gray-700">推荐高级预设头像 / Preset Avatars</label>
                 <div className="flex items-center gap-3">
                   <div className="relative shrink-0 mr-1">
-                    <img
-                      src={avatar}
-                      alt="Avatar Preview"
-                      className="w-14 h-14 rounded-full object-cover border-2 border-indigo-200 shadow-sm"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).src = PRESET_AVATARS[0];
-                      }}
-                    />
-                    <span className="absolute -bottom-1 -right-1 bg-emerald-500 text-white rounded-full p-0.5 border border-white text-[7px] font-bold font-mono">
-                      LIVE
-                    </span>
+                    {avatar ? (
+                      <img
+                        src={avatar}
+                        alt="Avatar Preview"
+                        className="w-14 h-14 rounded-full object-cover border-2 border-indigo-200 shadow-sm"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = PRESET_AVATARS[0];
+                        }}
+                      />
+                    ) : (
+                      <div className="w-14 h-14 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center bg-gray-50 text-gray-400 text-xs font-bold">
+                        未设置
+                      </div>
+                    )}
+                    {avatar && (
+                      <span className="absolute -bottom-1 -right-1 bg-emerald-500 text-white rounded-full p-0.5 border border-white text-[7px] font-bold font-mono">
+                        LIVE
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex gap-2 p-2 bg-gray-50/50 rounded-2xl border border-gray-100/50 flex-wrap flex-grow justify-start items-center">
@@ -286,7 +320,10 @@ export default function Onboarding({ user, onComplete }: OnboardingProps) {
                       <button
                         key={idx}
                         type="button"
-                        onClick={() => setAvatar(url)}
+                        onClick={() => {
+                          setAvatar(url);
+                          setHasUploadedAvatar(true);
+                        }}
                         className={`w-9 h-9 rounded-full overflow-hidden border-2 transition-all hover:scale-105 cursor-pointer flex shrink-0 ${
                           avatar === url ? 'border-indigo-600 scale-105 shadow-md shadow-indigo-600/15' : 'border-transparent opacity-75 hover:opacity-100'
                         }`}
@@ -301,8 +338,11 @@ export default function Onboarding({ user, onComplete }: OnboardingProps) {
               {/* Drag & Drop Upload Block */}
               <div className="bg-zinc-50/50 rounded-2xl border border-zinc-100 p-4">
                 <ImageUploader 
-                  onUploadSuccess={(url) => setAvatar(url)}
-                  label="或者拖拽本地照片或点击在此上传您的个性化头像（自适应格式）"
+                  onUploadSuccess={(url) => {
+                    setAvatar(url);
+                    setHasUploadedAvatar(true);
+                  }}
+                  label="或者本地自定义上传 & 圆框裁剪（必填，支持拖拽）"
                 />
               </div>
             </div>

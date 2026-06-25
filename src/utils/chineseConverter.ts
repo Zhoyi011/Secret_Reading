@@ -1,14 +1,26 @@
 // @ts-ignore
 import * as OpenCC from 'opencc-js';
+import { Converter as NamedConverter } from 'opencc-js';
 
 let s2tConverter: ((text: string) => string) | null = null;
 let t2sConverter: ((text: string) => string) | null = null;
 
 try {
-  // @ts-ignore
-  s2tConverter = OpenCC.Converter({ from: 'cn', to: 'tw' });
-  // @ts-ignore
-  t2sConverter = OpenCC.Converter({ from: 'hk', to: 'cn' });
+  let activeConverter: any = null;
+  if (typeof NamedConverter === 'function') {
+    activeConverter = NamedConverter;
+  } else if (OpenCC && typeof (OpenCC as any).Converter === 'function') {
+    activeConverter = (OpenCC as any).Converter;
+  } else if (OpenCC && (OpenCC as any).default && typeof (OpenCC as any).default.Converter === 'function') {
+    activeConverter = (OpenCC as any).default.Converter;
+  }
+
+  if (activeConverter) {
+    s2tConverter = activeConverter({ from: 'cn', to: 'tw' });
+    t2sConverter = activeConverter({ from: 'hk', to: 'cn' });
+  } else {
+    console.warn("Could not find OpenCC Converter constructor on any exports!");
+  }
 } catch (e) {
   console.error("Failed to initialize OpenCC converters", e);
 }

@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, onSnapshot, getDoc, setDoc } from 'firebase/firestore';
+import { doc, onSnapshot, getDoc, setDoc, collection, query, where, orderBy, limit, updateDoc, writeBatch, deleteDoc, getDocs } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from './firebase';
-import { AppUser } from './types';
+import { AppUser, Notification } from './types';
 import Login from './components/Login';
 import Register from './components/Register';
 import Home from './components/Home';
@@ -12,8 +12,12 @@ import Admin from './components/Admin';
 import Profile from './components/Profile';
 import Settings from './components/Settings';
 import Onboarding from './components/Onboarding';
+import Bookshelf from './components/Bookshelf';
+import Messages from './components/Messages';
+import AuthorProfile from './components/AuthorProfile';
 import { motion, AnimatePresence } from 'motion/react';
-import { BookOpen, User, Shield, Compass, LogOut, Settings as SettingsIcon, Loader2 } from 'lucide-react';
+import { BookOpen, User, Shield, Compass, LogOut, Settings as SettingsIcon, Loader2, Bell, BellRing, Heart, UserPlus, Check, Trash2, Bookmark, MessageSquare, ShieldAlert } from 'lucide-react';
+import { safeLocalStorage, safeSessionStorage } from './utils/safeStorage';
 
 export default function App() {
   const [user, setUser] = useState<AppUser | null>(null);
@@ -21,9 +25,110 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(false);
   const [firestoreError, setFirestoreError] = useState<string | null>(null);
-  const [route, setRoute] = useState<string>('home'); // 'home', 'login', 'register', 'write', 'profile', 'admin', 'settings', 'post-detail'
+  const [route, setRoute] = useState<string>('home'); // 'home', 'login', 'register', 'write', 'profile', 'admin', 'settings', 'post-detail', 'bookshelf', 'messages', 'author-profile'
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
+  const [activeMessageUserId, setActiveMessageUserId] = useState<string | null>(null);
+  const [selectedAuthorId, setSelectedAuthorId] = useState<string | null>(null);
+  const [prevRoute, setPrevRoute] = useState<string>('home');
+
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+
+  const isCreatingProfileRef = React.useRef(false);
+  const bootstrapTimerRef = React.useRef<any>(null);
+
+  // 1.2. Listen to real-time notifications when the user is authenticated
+  useEffect(() => {
+    if (!firebaseUser) {
+      setNotifications([]);
+      return;
+    }
+
+    const notifRef = collection(db, 'notifications');
+    const q = query(
+      notifRef,
+      where('recipientId', '==', firebaseUser.uid)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list: Notification[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push({
+          id: docSnap.id,
+          ...docSnap.data()
+        } as Notification);
+      });
+      
+      // Sort locally in memory to avoid needing a composite index
+      list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      setNotifications(list.slice(0, 50));
+
+      // Trigger standard HTML5 system desktop notifications for newly added unread notifications
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === 'added') {
+          const data = change.doc.data();
+          const diffMs = Date.now() - new Date(data.createdAt).getTime();
+          if (!data.read && diffMs < 15000) {
+            if ('Notification' in window && window.Notification.permission === 'granted') {
+              new window.Notification(data.title || '您有新的消息', {
+                body: data.body,
+                icon: data.senderAvatar || '/icon.png'
+              });
+            }
+          }
+        }
+      });
+
+    }, (err) => {
+      console.error("Listening notifications failed:", err);
+    });
+
+    return () => unsubscribe();
+  }, [firebaseUser]);
+
+  const handleMarkAsRead = async (notifId: string) => {
+    try {
+      const notifDocRef = doc(db, 'notifications', notifId);
+      await updateDoc(notifDocRef, { read: true });
+    } catch (err) {
+      console.error("Failed to mark notification as read:", err);
+    }
+  };
+
+  const handleMarkAllAsRead = async () => {
+    try {
+      const unreadList = notifications.filter(n => !n.read);
+      if (unreadList.length === 0) return;
+      
+      const batch = writeBatch(db);
+      unreadList.forEach(n => {
+        const docRef = doc(db, 'notifications', n.id);
+        batch.update(docRef, { read: true });
+      });
+      await batch.commit();
+    } catch (err) {
+      console.error("Failed to mark all as read:", err);
+    }
+  };
+
+  const handleDeleteNotification = async (notifId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const notifDocRef = doc(db, 'notifications', notifId);
+      // Wait, deleteDoc is not imported in App.tsx! We should import it, or use setDoc with empty or deleteDoc.
+      // Let's check imports in App.tsx. Currently we have setDoc, updateDoc.
+      // Wait, we can import deleteDoc, or use it if imported. Let's make sure deleteDoc is imported. Let's see the import.
+      // In line 3 we have: import { doc, onSnapshot, getDoc, setDoc, collection, query, where, orderBy, limit, updateDoc, writeBatch } from 'firebase/firestore';
+      // Let's edit the import to include deleteDoc too! Let's do that cleanly.
+      const batch = writeBatch(db);
+      const docRef = doc(db, 'notifications', notifId);
+      batch.delete(docRef);
+      await batch.commit();
+    } catch (err) {
+      console.error("Failed to delete notification:", err);
+    }
+  };
 
   // 1. Listen to Firebase authentication status
   useEffect(() => {
@@ -42,13 +147,18 @@ export default function App() {
         setRoute('login');
         setAuthLoading(false);
         setFirestoreError(null);
+        isCreatingProfileRef.current = false;
+        if (bootstrapTimerRef.current) {
+          clearTimeout(bootstrapTimerRef.current);
+          bootstrapTimerRef.current = null;
+        }
       } else {
         // Feed user document from Firestore dynamically
         setProfileLoading(true);
         const userRef = doc(db, 'users', fbUser.uid);
         
         // Listen in real-time to user profile changes
-        activeSnapshotUnsubscribe = onSnapshot(userRef, (snapshot) => {
+        activeSnapshotUnsubscribe = onSnapshot(userRef, (snapshot: any) => {
           if (snapshot.exists()) {
             setUser({
               ...snapshot.data(),
@@ -61,9 +171,26 @@ export default function App() {
             setAuthLoading(false);
             setFirestoreError(null);
           } else {
+            // If the document does not exist but is loaded from cache (offline replication),
+            // wait for the server response before initiating auto-bootstrap to avoid "client offline" error
+            if (snapshot.metadata.fromCache) {
+              console.log("[Auto-Bootstrap] Profile missing in local cache; holding for server verification...");
+              return;
+            }
+
+            if (isCreatingProfileRef.current) {
+              return;
+            }
+
+            isCreatingProfileRef.current = true;
             console.warn("Firestore User profile document missing or creating...");
+
+            if (bootstrapTimerRef.current) {
+              clearTimeout(bootstrapTimerRef.current);
+            }
+
             // Non-blocking auto-creation with deliberate delay to prevent lockout or race condition errors
-            setTimeout(async () => {
+            bootstrapTimerRef.current = setTimeout(async () => {
               try {
                 // Check if user is still logged in before writing
                 if (auth.currentUser) {
@@ -78,20 +205,32 @@ export default function App() {
                     avatar: fbUser.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
                     role: initialRole,
                     createdAt: new Date().toISOString(),
+                    onboarded: false,
                   };
-                  await setDoc(userRef, payload);
+                  
+                  // Writing directly using setDoc (Firestore automatically buffers writes locally when completely offline)
+                  await setDoc(userRef, payload, { merge: true });
+                  console.log("[Auto-Bootstrap] Successfully initialized missing user profile in Firestore.");
                 }
               } catch (bootstrapErr: any) {
-                console.error("Auto-bootstrap profile failed during delay:", bootstrapErr);
+                isCreatingProfileRef.current = false; // Allow retry on subsequent cycles if write fails
                 const errMsg = bootstrapErr?.message || String(bootstrapErr);
                 if (errMsg.includes('offline') || errMsg.includes('client is offline')) {
-                  setFirestoreError(`初始化用户配置失败，处于离线状态: ${errMsg}`);
+                  console.warn("Auto-bootstrap profile failed during delay (offline/buffered):", bootstrapErr);
+                } else {
+                  console.error("Auto-bootstrap profile failed during write:", bootstrapErr);
+                  setFirestoreError(`初始化用户配置失败: ${errMsg}`);
                 }
               }
             }, 1000);
           }
         }, (err) => {
-          console.error("Listening user's profile failed:", err);
+          const errMsg = err?.message || String(err);
+          if (errMsg.includes('offline') || errMsg.includes('client is offline')) {
+            console.warn("Listening user's profile failed (offline):", err);
+          } else {
+            console.error("Listening user's profile failed:", err);
+          }
           setProfileLoading(false);
           setAuthLoading(false);
           // Set error instead of crashing the React App
@@ -108,11 +247,88 @@ export default function App() {
     };
   }, []);
 
+  // Listen to custom event for inner author profile routing
+  useEffect(() => {
+    const handleNavigateToAuthor = (e: Event) => {
+      const authorId = (e as CustomEvent).detail;
+      if (authorId) {
+        setPrevRoute(route);
+        setSelectedAuthorId(authorId);
+        setRoute('author-profile');
+      }
+    };
+    window.addEventListener('navigate-to-author', handleNavigateToAuthor);
+    return () => {
+      window.removeEventListener('navigate-to-author', handleNavigateToAuthor);
+    };
+  }, [route]);
+
+  // Handle URL route mapping on startup (e.g. /authorName/123456)
+  useEffect(() => {
+    const handleUrlRoute = async () => {
+      const pathParts = window.location.pathname.split('/').filter(Boolean);
+      if (pathParts.length === 2) {
+        const [authorName, shortId] = pathParts;
+        if (/^\d{6}$/.test(shortId)) {
+          try {
+            const postsRef = collection(db, 'posts');
+            const q = query(postsRef, where('shortId', '==', shortId));
+            const snap = await getDocs(q);
+            if (!snap.empty) {
+              const matchedPostDoc = snap.docs[0];
+              setSelectedPostId(matchedPostDoc.id);
+              setRoute('post-detail');
+            } else {
+              console.warn("Post with shortId not found:", shortId);
+            }
+          } catch (err) {
+            console.error("Failed to fetch post by shortId:", err);
+          }
+        }
+      } else if (pathParts.length === 1 && pathParts[0] === 'bookshelf') {
+        setRoute('bookshelf');
+      } else if (pathParts.length === 1 && pathParts[0] === 'messages') {
+        setRoute('messages');
+      } else if (pathParts.length === 1 && pathParts[0] === 'profile') {
+        setRoute('profile');
+      } else if (pathParts.length === 1 && pathParts[0] === 'settings') {
+        setRoute('settings');
+      } else if (pathParts.length === 1 && pathParts[0] === 'admin') {
+        setRoute('admin');
+      }
+    };
+    handleUrlRoute();
+  }, []);
+
+  // Sync state changes with the browser URL
+  useEffect(() => {
+    if (route === 'home') {
+      window.history.pushState(null, '', '/');
+    } else if (route === 'bookshelf') {
+      window.history.pushState(null, '', '/bookshelf');
+    } else if (route === 'messages') {
+      window.history.pushState(null, '', '/messages');
+    } else if (route === 'profile') {
+      window.history.pushState(null, '', '/profile');
+    } else if (route === 'admin') {
+      window.history.pushState(null, '', '/admin');
+    } else if (route === 'settings') {
+      window.history.pushState(null, '', '/settings');
+    }
+  }, [route]);
+
+  const handleSelectAuthor = (authorId: string) => {
+    setPrevRoute(route);
+    setSelectedAuthorId(authorId);
+    setRoute('author-profile');
+  };
+
   // 1.5. Protect copyright rights / 禁止右键和复制，特定条件除外
   useEffect(() => {
     // Disable right click / contextmenu globally unless targeting writing panels or dedicated forms
     const handleContextMenu = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
+      const target = e.target;
+      if (!target || !(target instanceof Element)) return;
       
       const isCreatorOrForm = 
         target.closest('#write-page') || 
@@ -129,14 +345,16 @@ export default function App() {
 
     // Disable standard copy operations globally except for the author writer interface or form inputs
     const handleCopy = (e: ClipboardEvent) => {
-      const target = e.target as HTMLElement;
+      const target = e.target;
+      if (!target || !(target instanceof Element)) return;
       
       const isCreatorWrite = 
         target.closest('#write-page') || 
         target.closest('#write-post-container') ||
         target.closest('.allow-copy') || 
-        target.tagName === 'INPUT' || 
-        target.tagName === 'TEXTAREA';
+        target.closest('input') || 
+        target.closest('textarea') || 
+        target.closest('[contenteditable="true"]');
 
       if (!isCreatorWrite) {
         e.preventDefault();
@@ -145,7 +363,9 @@ export default function App() {
 
     // Disable paste operations generally, but definitely allow inside inputs and textareas (such as search bar, etc.)
     const handlePaste = (e: ClipboardEvent) => {
-      const target = e.target as HTMLElement;
+      const target = e.target;
+      if (!target || !(target instanceof Element)) return;
+
       const isInputOrTextArea = 
         target.closest('input') || 
         target.closest('textarea') || 
@@ -190,8 +410,8 @@ export default function App() {
     
     // 3. Clear localStorage and sessionStorage entirely to purge active states
     try {
-      localStorage.clear();
-      sessionStorage.clear();
+      safeLocalStorage.clear();
+      safeSessionStorage.clear();
     } catch (storageErr) {
       console.error("Error clearing local/session storage:", storageErr);
     }
@@ -343,10 +563,29 @@ export default function App() {
     }
 
     // Determine if user requires onboarding setup
-    const needsOnboarding = user && (
-      user.onboarded === false || 
-      (user.onboarded === undefined && (user.username || '').startsWith('读者_'))
-    );
+    const needsOnboarding = user && user.onboarded !== true;
+
+    if (user && user.status === 'frozen') {
+      return (
+        <div className="max-w-xl mx-auto mt-20 p-8 text-center bg-white rounded-3xl border border-red-100 shadow-xl animate-fade-in">
+          <div className="h-14 w-14 bg-red-50 text-red-650 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <ShieldAlert className="h-8 w-8" />
+          </div>
+          <h2 className="text-xl font-bold font-display text-gray-900">您的账户已被暂时冻结</h2>
+          <p className="text-gray-500 mt-3 text-sm leading-relaxed">
+            经平台管理员核实，您的账号由于涉嫌违反社区作品交流守则或遭受多位读者举报，现已被执行冻结封禁。
+            <br />
+            如有疑问，请点击下方退出账号，或联系站长进行申诉处理。
+          </p>
+          <button
+            onClick={() => handleLogout()}
+            className="mt-8 px-5 py-2.5 bg-gray-100 hover:bg-gray-150 text-gray-700 font-bold rounded-xl text-xs transition-all cursor-pointer"
+          >
+            退出账号
+          </button>
+        </div>
+      );
+    }
 
     if (needsOnboarding) {
       return <Onboarding user={user} onComplete={() => setRoute('home')} />;
@@ -358,7 +597,7 @@ export default function App() {
       case 'register':
         return <Register onNavigate={setRoute} onSuccess={handleAuthSuccess} />;
       case 'home':
-        return <Home user={user} onNavigate={setRoute} onSelectPost={handleSelectPost} />;
+        return <Home user={user} onNavigate={setRoute} onSelectPost={handleSelectPost} onSelectAuthor={handleSelectAuthor} />;
       case 'write':
         return <Write user={user} draftId={editingPostId} onNavigate={setRoute} />;
       case 'post-detail':
@@ -369,24 +608,44 @@ export default function App() {
             onNavigate={setRoute}
             onEditPost={handleEditPost}
             onBack={() => setRoute('home')}
+            onStartChat={(authorId) => {
+              setActiveMessageUserId(authorId);
+              setRoute('messages');
+            }}
+            onSelectAuthor={handleSelectAuthor}
+          />
+        );
+      case 'author-profile':
+        return (
+          <AuthorProfile
+            authorId={selectedAuthorId || ''}
+            user={user}
+            onNavigate={setRoute}
+            onSelectPost={handleSelectPost}
+            onStartChat={(authorId) => {
+              setActiveMessageUserId(authorId);
+              setRoute('messages');
+            }}
+            onBack={() => setRoute(prevRoute || 'home')}
           />
         );
       case 'admin':
         return <Admin user={user} onNavigate={setRoute} onSelectPost={handleSelectPost} />;
       case 'profile':
-        return <Profile user={user} onNavigate={setRoute} onSelectPost={handleSelectPost} onEditPost={handleEditPost} />;
+        return <Profile user={user} onNavigate={setRoute} onSelectPost={handleSelectPost} onEditPost={handleEditPost} onSelectAuthor={handleSelectAuthor} />;
       case 'settings':
         return <Settings user={user} onBack={() => setRoute('home')} />;
+      case 'bookshelf':
+        return <Bookshelf user={user} onNavigate={setRoute} onSelectPost={handleSelectPost} />;
+      case 'messages':
+        return <Messages user={user} onNavigate={setRoute} recipientId={activeMessageUserId} />;
       default:
-        return <Home user={user} onNavigate={setRoute} onSelectPost={handleSelectPost} />;
+        return <Home user={user} onNavigate={setRoute} onSelectPost={handleSelectPost} onSelectAuthor={handleSelectAuthor} />;
     }
   };
 
   const isAuthPage = route === 'login' || route === 'register';
-  const needsOnboarding = user && (
-    user.onboarded === false || 
-    (user.onboarded === undefined && (user.username || '').startsWith('读者_'))
-  );
+  const needsOnboarding = user && user.onboarded !== true;
 
   return (
     <div className="min-h-screen flex flex-col bg-[#fafafa]">
@@ -422,6 +681,25 @@ export default function App() {
                 <span className="hidden md:inline">专栏推荐</span>
               </button>
 
+              <button
+                onClick={() => setRoute('bookshelf')}
+                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all ${route === 'bookshelf' ? 'bg-indigo-50 text-indigo-600' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'}`}
+              >
+                <Bookmark className="h-4 w-4" />
+                <span className="hidden md:inline">我的书架</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setActiveMessageUserId(null); // Clear any preselected recipient on direct click
+                  setRoute('messages');
+                }}
+                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all ${route === 'messages' ? 'bg-indigo-50 text-indigo-600' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'}`}
+              >
+                <MessageSquare className="h-4 w-4" />
+                <span className="hidden md:inline">私人来信</span>
+              </button>
+
               {user.role === 'owner' && (
                 <button
                   onClick={() => setRoute('admin')}
@@ -439,6 +717,163 @@ export default function App() {
                 <User className="h-4 w-4" />
                 <span className="hidden md:inline">个人中心</span>
               </button>
+
+              {/* Notification Bell with Badge */}
+              <div className="relative">
+                <button
+                  onClick={() => {
+                    setShowNotifications(!showNotifications);
+                    if ('Notification' in window && window.Notification.permission === 'default') {
+                      window.Notification.requestPermission();
+                    }
+                  }}
+                  title="通知中心"
+                  className={`p-2 rounded-xl transition-all relative ${showNotifications ? 'bg-indigo-50 text-indigo-600' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'}`}
+                >
+                  {notifications.some(n => !n.read) ? (
+                    <BellRing className="h-4.5 w-4.5 text-indigo-600 animate-pulse" />
+                  ) : (
+                    <Bell className="h-4.5 w-4.5" />
+                  )}
+                  {notifications.filter(n => !n.read).length > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-rose-600 text-white font-bold text-[9px] min-w-4 h-4 rounded-full flex items-center justify-center px-1 border border-white">
+                      {notifications.filter(n => !n.read).length}
+                    </span>
+                  )}
+                </button>
+
+                {/* Notifications Dropdown Panel */}
+                <AnimatePresence>
+                  {showNotifications && (
+                    <>
+                      {/* Click outside overlay */}
+                      <div className="fixed inset-0 z-40 cursor-default" onClick={() => setShowNotifications(false)} />
+                      
+                      <motion.div
+                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                        transition={{ duration: 0.15 }}
+                        className="absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-2xl border border-gray-150/70 shadow-xl z-50 overflow-hidden flex flex-col max-h-[480px]"
+                      >
+                        {/* Header */}
+                        <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-zinc-50/50">
+                          <h4 className="font-display font-bold text-gray-900 text-sm flex items-center gap-1.5">
+                            通知中心
+                            {notifications.filter(n => !n.read).length > 0 && (
+                              <span className="bg-rose-50 text-rose-700 text-[10px] px-1.5 py-0.5 rounded-full font-bold">
+                                {notifications.filter(n => !n.read).length}条未读
+                              </span>
+                            )}
+                          </h4>
+                          {notifications.filter(n => !n.read).length > 0 && (
+                            <button
+                              onClick={handleMarkAllAsRead}
+                              className="text-xs text-indigo-600 hover:text-indigo-700 font-bold hover:underline"
+                            >
+                              全部已读
+                            </button>
+                          )}
+                        </div>
+
+                        {/* List */}
+                        <div className="overflow-y-auto divide-y divide-gray-50 flex-grow scrollbar-thin">
+                          {notifications.length === 0 ? (
+                            <div className="py-12 px-4 text-center">
+                              <Bell className="h-8 w-8 text-gray-350 mx-auto mb-2" />
+                              <p className="text-xs font-semibold text-gray-400">暂无任何通知</p>
+                              <p className="text-[10px] text-gray-300 mt-1">关注作者或收到点赞时会在此通知</p>
+                            </div>
+                          ) : (
+                            notifications.map((notif) => (
+                              <div
+                                key={notif.id}
+                                onClick={() => {
+                                  handleMarkAsRead(notif.id);
+                                  if (notif.postId) {
+                                    handleSelectPost(notif.postId);
+                                  }
+                                  setShowNotifications(false);
+                                }}
+                                className={`p-3.5 flex gap-3 transition-colors cursor-pointer text-left ${notif.read ? 'bg-white hover:bg-zinc-50/60' : 'bg-indigo-50/20 hover:bg-indigo-50/45 border-l-2 border-indigo-600'}`}
+                              >
+                                {notif.senderAvatar ? (
+                                  <img
+                                    src={notif.senderAvatar}
+                                    alt="Avatar"
+                                    referrerPolicy="no-referrer"
+                                    className="h-8 w-8 rounded-full object-cover shrink-0 border border-zinc-100"
+                                  />
+                                ) : (
+                                  <div className="h-8 w-8 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-xs shrink-0">
+                                    {notif.senderName?.slice(0, 1) || '系'}
+                                  </div>
+                                )}
+                                
+                                <div className="flex-1 min-w-0 space-y-1">
+                                  <div className="flex items-center justify-between gap-1.5">
+                                    <span className="font-bold text-[11px] text-gray-800 truncate">
+                                      {notif.senderName}
+                                    </span>
+                                    <span className="text-[9px] text-gray-400 font-medium shrink-0 font-mono">
+                                      {new Date(notif.createdAt).toLocaleDateString()}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs font-semibold text-gray-900 leading-snug">
+                                    {notif.title}
+                                  </p>
+                                  <p className="text-[11px] text-gray-500 leading-relaxed font-medium break-words">
+                                    {notif.body}
+                                  </p>
+                                </div>
+
+                                <div className="flex flex-col justify-between items-end shrink-0 gap-2">
+                                  <button
+                                    onClick={(e) => handleDeleteNotification(notif.id, e)}
+                                    className="p-1 rounded text-gray-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                                    title="删除此通知"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </button>
+                                  {!notif.read && (
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleMarkAsRead(notif.id);
+                                      }}
+                                      className="p-1 rounded text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
+                                      title="设为已读"
+                                    >
+                                      <Check className="h-3 w-3" />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
+
+                        {/* Footer info explaining browser pushes */}
+                        <div className="p-3 border-t border-gray-100 bg-zinc-50/40 text-[10px] text-gray-400 flex items-center justify-between font-medium">
+                          <span>🔔 开启浏览器桌面通知，即使离开页面也能收到推送。</span>
+                          <button
+                            onClick={() => {
+                              if ('Notification' in window) {
+                                window.Notification.requestPermission().then(permission => {
+                                  alert(permission === 'granted' ? '桌面通知授权成功！' : '桌面通知授权已被拒绝，请在浏览器设置中开启。');
+                                });
+                              }
+                            }}
+                            className="text-indigo-600 font-bold hover:underline font-display"
+                          >
+                            立即开启
+                          </button>
+                        </div>
+                      </motion.div>
+                    </>
+                  )}
+                </AnimatePresence>
+              </div>
 
               <button
                 onClick={() => setRoute('settings')}

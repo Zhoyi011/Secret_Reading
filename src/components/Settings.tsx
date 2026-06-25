@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { AppUser } from '../types';
 import ImageUploader from './ImageUploader';
@@ -14,6 +14,7 @@ interface SettingsProps {
 export default function Settings({ user, onBack }: SettingsProps) {
   const [username, setUsername] = useState('');
   const [avatar, setAvatar] = useState('');
+  const [filterR18, setFilterR18] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,6 +25,7 @@ export default function Settings({ user, onBack }: SettingsProps) {
     if (user) {
       setUsername(user.username || '');
       setAvatar(user.avatar || '');
+      setFilterR18(user.filterR18 !== false);
       const existingMongo = mongoClient.findUserById(user.firebaseUid);
       if (existingMongo) {
         setMongoDoc(existingMongo);
@@ -49,16 +51,34 @@ export default function Settings({ user, onBack }: SettingsProps) {
       const updatePayload = {
         username: username.trim(),
         avatar: avatar.trim(),
+        filterR18: filterR18,
       };
 
       await updateDoc(userRef, updatePayload);
+
+      // Cascade update author name and avatar in all previous posts
+      try {
+        const postsRef = collection(db, 'posts');
+        const postsQuery = query(postsRef, where('authorId', '==', user.firebaseUid));
+        const postsSnap = await getDocs(postsQuery);
+        const updatePromises = postsSnap.docs.map(postDoc => 
+          updateDoc(doc(db, 'posts', postDoc.id), {
+            authorName: username.trim(),
+            authorAvatar: avatar.trim()
+          })
+        );
+        await Promise.all(updatePromises);
+      } catch (postUpdateErr) {
+        console.error("Failed to cascade update author details on historical posts:", postUpdateErr);
+      }
 
       // 2. Simultaneously save to client-side simulated MongoDB cluster
       const updatedMongo = mongoClient.saveUserSettings(user.firebaseUid, {
         username: username.trim(),
         avatar: avatar.trim(),
         email: user.email,
-        role: user.role
+        role: user.role,
+        filterR18: filterR18
       });
       setMongoDoc(updatedMongo);
 
@@ -126,7 +146,7 @@ export default function Settings({ user, onBack }: SettingsProps) {
             </div>
             <div className="text-center sm:text-left space-y-1">
               <h4 className="text-xs font-bold text-gray-700">头像预览与上传</h4>
-              <p className="text-[10px] text-gray-400">支持拖拽图片在下方上传，或者直接粘贴图片 URL 地址</p>
+              <p className="text-[10px] text-gray-400">支持拖拽图片在下方上传，自适应格式并自动配置档案</p>
             </div>
           </div>
 
@@ -147,16 +167,21 @@ export default function Settings({ user, onBack }: SettingsProps) {
             />
           </div>
 
-          {/* Custom Avatar URL Field */}
-          <div className="space-y-1.5">
-            <label className="block text-xs font-bold text-gray-700">头像图片 URL 链接</label>
-            <input
-              type="text"
-              value={avatar}
-              onChange={(e) => setAvatar(e.target.value)}
-              placeholder="e.g. https://images.unsplash.com/photo-..."
-              className="block w-full rounded-xl border border-gray-200 py-2.5 px-3.5 text-xs text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 shadow-2xs transition-all"
-            />
+          {/* R18 Content Filtering Toggle */}
+          <div className="bg-gray-50/55 p-4 rounded-2xl border border-gray-100/80 flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <h4 className="text-xs font-bold text-gray-700">过滤 R18 敏感内容</h4>
+              <p className="text-[10px] text-gray-400 leading-normal">默认开启。关闭后，可在社区中公开搜索及浏览 R18 分级博文。</p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer select-none shrink-0">
+              <input
+                type="checkbox"
+                checked={filterR18}
+                onChange={(e) => setFilterR18(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+            </label>
           </div>
 
           {/* Image Upload Widget */}
@@ -234,6 +259,7 @@ export default function Settings({ user, onBack }: SettingsProps) {
           <div className="pl-4"><span className="text-slate-400">"username":</span> <span className="text-teal-300">"{username || user.username}"</span>,</div>
           <div className="pl-4"><span className="text-slate-400">"avatar":</span> <span className="text-teal-300">"{avatar ? (avatar.length > 50 ? avatar.slice(0, 50) + "..." : avatar) : 'Default'}"</span>,</div>
           <div className="pl-4"><span className="text-slate-400">"role":</span> <span className="text-teal-300">"{user.role}"</span>,</div>
+          <div className="pl-4"><span className="text-slate-400">"filterR18":</span> <span className="text-amber-300">{filterR18 ? 'true' : 'false'}</span>,</div>
           <div className="pl-4"><span className="text-slate-400">"updatedAt":</span> <span className="text-amber-300">"{mongoDoc?.updatedAt || new Date().toISOString()}"</span>,</div>
           <div className="pl-4"><span className="text-slate-400">"__v":</span> <span className="text-amber-300">{mongoDoc?.__v || 0}</span></div>
           <div>{'}'}</div>

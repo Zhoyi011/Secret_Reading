@@ -3,6 +3,7 @@ import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from '../firebase';
 import { Loader2, BookOpen, ShieldCheck } from 'lucide-react';
+import { safeLocalStorage } from '../utils/safeStorage';
 
 interface LoginProps {
   onNavigate: (route: string) => void;
@@ -17,7 +18,7 @@ export default function Login({ onNavigate, onSuccess }: LoginProps) {
     setLoading(true);
     setError(null);
     try {
-      localStorage.removeItem('local_mock_user');
+      safeLocalStorage.removeItem('local_mock_user');
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
       const result = await signInWithPopup(auth, provider);
@@ -39,6 +40,7 @@ export default function Login({ onNavigate, onSuccess }: LoginProps) {
           avatar: user.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
           role: initialRole,
           createdAt: new Date().toISOString(),
+          onboarded: false,
         };
         
         try {

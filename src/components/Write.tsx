@@ -1,9 +1,31 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, deleteDoc, setDoc, addDoc, collection, getDocs, query, where } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
+import { AppUser, Post } from '../types';
+import { ArrowLeft, Save, Play, Loader2, Image as ImageIcon, Crop, RotateCcw, Edit3, Eye, ShieldAlert, CheckCircle, Tag, Calendar, Search, Check, X } from 'lucide-react';
 import ImageUploader from './ImageUploader';
-import { AppUser } from '../types';
-import { Image as ImageIcon, Save, CheckCircle, FileText, ArrowLeft, Loader2, Play, Eye, Edit3 } from 'lucide-react';
+import ImageCropper from './ImageCropper';
+
+// Safe localStorage implementation to handle Safari Private mode or sandbox environments
+const safeLocalStorage = {
+  getItem(key: string): string | null {
+    try {
+      return localStorage.getItem(key);
+    } catch (_) {
+      return null;
+    }
+  },
+  setItem(key: string, value: string): void {
+    try {
+      localStorage.setItem(key, value);
+    } catch (_) {}
+  },
+  removeItem(key: string): void {
+    try {
+      localStorage.removeItem(key);
+    } catch (_) {}
+  }
+};
 
 interface WriteProps {
   user: AppUser | null;
@@ -11,59 +33,136 @@ interface WriteProps {
   onNavigate: (route: string) => void;
 }
 
+const TAG_CATEGORIES: Record<string, string[]> = {
+  '内容主题': ['纯爱', '虐恋', '病娇', '黑化', '救赎', '先婚后爱', '破镜重圆', '暗恋成真', '替身文学', '强制爱', '养成系', '双向奔赴', '恨海情天', '宿命感'],
+  '关系设定': ['师生', '师徒（年上）', '师徒（年下）', '上司下属', '青梅竹马', '天降', '骨科（亲）', '骨科（伪）', '宿敌', '主仆', '老板员工', '教授学生', '继亲', '叔侄', '义兄弟/义姐妹'],
+  '场景风格': ['架空', '现代', '古代', '民国', '星际', '末世', '西幻', '东方玄幻', 'ABO', '哨兵向导', '穿越', '重生', '系统', '无限流', '娱乐圈', '电竞', '校园', '职场', '黑道', '悬疑'],
+  '特殊属性': ['微肉', '中肉', '重肉', '纯肉', '前戏为主', '后入', '骑乘', '口交', '足交', '乳交', 'SM', '捆绑', '强制', '催眠', '触手', '兽人', '人外', '产乳', '怀孕', '双性', '扶她', '女攻男受', '男攻女受', '互攻'],
+  '结局倾向': ['甜', '微虐', '大虐', '先虐后甜', '先甜后虐', '开放式结局', 'HE', 'BE', '意难平']
+};
+
+const AVAILABLE_TAGS = Object.values(TAG_CATEGORIES).flat();
+
 export default function Write({ user, draftId, onNavigate }: WriteProps) {
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [images, setImages] = useState<string[]>([]);
+  const [isR18, setIsR18] = useState(false);
   const [status, setStatus] = useState<'draft' | 'published'>('draft');
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [coverImage, setCoverImage] = useState('');
+  const [croppingCoverUrl, setCroppingCoverUrl] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'edit' | 'preview'>('edit');
 
-  const currentPostIdRef = useRef<string>(draftId || `post-${Date.now()}`);
+  // New features
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [showTagModal, setShowTagModal] = useState(false);
+  const [tagSearchQuery, setTagSearchQuery] = useState('');
+  const [activeTagTab, setActiveTagTab] = useState<string>('全部');
+  const [publishAt, setPublishAt] = useState<string>('');
 
-  // 1. Role validation check: must be 'author' or 'owner' to compose or edit
+  const currentPostIdRef = useRef<string>(draftId || doc(collection(db, 'posts')).id);
+  const isCreatingProfileRef = useRef<boolean>(false);
+
+  // Load existing draft or set up a new document ID
   useEffect(() => {
-    if (user && user.role !== 'author' && user.role !== 'owner') {
-      alert("权限不足！您当前的账户级别没有写作权限。只有创作者 (Author) 或管理员 (Owner) 权限可发文撰写。");
-      onNavigate('home');
-    }
-  }, [user, onNavigate]);
+    const loadPost = async () => {
+      if (!user) return;
 
-  if (!user || (user.role !== 'author' && user.role !== 'owner')) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center" id="write-loading-verify">
-        <Loader2 className="h-9 w-9 animate-spin text-indigo-600 mb-4" />
-        <p className="text-sm font-medium text-gray-500">正在校验创作者/管理员撰写权，请稍等...</p>
-      </div>
-    );
-  }
+      let dbTitle = '';
+      let dbContent = '';
+      let dbImages: string[] = [];
+      let dbCoverImage = '';
+      let dbStatus: 'draft' | 'published' = 'draft';
+      let dbIsR18 = false;
+      let dbTags: string[] = [];
+      let dbPublishAt = '';
 
-  // Load existing article draft or post if editing
-  useEffect(() => {
-    if (draftId) {
-      const loadPost = async () => {
+      if (draftId) {
         try {
           const postRef = doc(db, 'posts', draftId);
           const postSnap = await getDoc(postRef);
           if (postSnap.exists()) {
             const data = postSnap.data();
-            setTitle(data.title || '');
-            setContent(data.content || '');
-            setImages(data.images || []);
-            setStatus(data.status || 'draft');
+            dbTitle = data.title || '';
+            dbContent = data.content || '';
+            dbImages = data.images || [];
+            dbCoverImage = data.coverImage || '';
+            dbStatus = data.status || 'draft';
+            dbIsR18 = data.isR18 || false;
+            dbTags = data.tags || [];
+            dbPublishAt = data.publishAt || '';
             currentPostIdRef.current = draftId;
           }
         } catch (err) {
           console.error("Failed to load article draft:", err);
         }
-      };
-      loadPost();
-    }
-  }, [draftId]);
+      }
 
-  // Autosave timer: every 30 seconds
+      // Restore from local cached autosave if available and newer/unsaved
+      const cacheKey = draftId ? `pending_draft_${user.firebaseUid}_${draftId}` : `pending_draft_${user.firebaseUid}_new`;
+      const cached = safeLocalStorage.getItem(cacheKey);
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (parsed && (
+            parsed.title !== dbTitle || 
+            parsed.content !== dbContent || 
+            parsed.isR18 !== dbIsR18 || 
+            parsed.coverImage !== dbCoverImage || 
+            parsed.images?.length !== dbImages.length ||
+            parsed.tags?.length !== dbTags.length
+          )) {
+            setTitle(parsed.title || '');
+            setContent(parsed.content || '');
+            setImages(parsed.images || dbImages);
+            setCoverImage(parsed.coverImage || dbCoverImage);
+            setIsR18(parsed.isR18 !== undefined ? parsed.isR18 : dbIsR18);
+            setSelectedTags(parsed.tags || dbTags);
+            setPublishAt(parsed.publishAt || dbPublishAt);
+            setStatus(dbStatus);
+            console.log("[DraftRecovery] Restored unsaved modifications from local storage.");
+            return;
+          }
+        } catch (e) {
+          console.error("Failed to parse local draft cache:", e);
+        }
+      }
+
+      setTitle(dbTitle);
+      setContent(dbContent);
+      setImages(dbImages);
+      setCoverImage(dbCoverImage);
+      setIsR18(dbIsR18);
+      setSelectedTags(dbTags);
+      setPublishAt(dbPublishAt);
+      setStatus(dbStatus);
+    };
+
+    loadPost();
+  }, [draftId, user]);
+
+  // Synchronize current inputs directly to localStorage cache on every change
+  useEffect(() => {
+    if (!user) return;
+    if (title.trim() || content.trim()) {
+      const cacheKey = draftId ? `pending_draft_${user.firebaseUid}_${draftId}` : `pending_draft_${user.firebaseUid}_new`;
+      safeLocalStorage.setItem(cacheKey, JSON.stringify({
+        title,
+        content,
+        images,
+        coverImage,
+        isR18,
+        tags: selectedTags,
+        publishAt,
+        updatedAt: new Date().toISOString()
+      }));
+    }
+  }, [title, content, images, coverImage, isR18, selectedTags, publishAt, user, draftId]);
+
+  // Autosave timer: every 30 seconds to the cloud Firestore DB
   useEffect(() => {
     const timer = setInterval(() => {
       if (title.trim() || content.trim()) {
@@ -72,28 +171,45 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
     }, 30000);
 
     return () => clearInterval(timer);
-  }, [title, content, images]);
+  }, [title, content, images, coverImage, isR18, selectedTags, publishAt]);
 
   const autoSaveDraft = async () => {
     if (!user) return;
     setSaveStatus('saving');
     try {
       const now = new Date().toISOString();
+      
+      let existingShortId = '';
+      const postRef = doc(db, 'posts', currentPostIdRef.current);
+      try {
+        const snap = await getDoc(postRef);
+        if (snap.exists()) {
+          existingShortId = snap.data().shortId || '';
+        }
+      } catch (_) {}
+
+      if (!existingShortId) {
+        existingShortId = Math.floor(100000 + Math.random() * 900000).toString();
+      }
+
       const payload = {
         id: currentPostIdRef.current,
         title: title || '未命名草稿',
         content: content || '',
         authorId: user.firebaseUid,
         authorName: user.username,
+        authorAvatar: user.avatar || '',
         images: images,
-        likes: 0,
-        likers: [],
+        coverImage: coverImage,
         status: 'draft' as const,
         createdAt: now,
         updatedAt: now,
+        isR18: isR18,
+        tags: selectedTags,
+        publishAt: publishAt || null,
+        shortId: existingShortId,
       };
 
-      const postRef = doc(db, 'posts', currentPostIdRef.current);
       await setDoc(postRef, payload, { merge: true });
 
       setLastSaved(new Date().toLocaleTimeString());
@@ -121,13 +237,19 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
       alert("请输入文章内容");
       return;
     }
+    if (selectedTags.length < 3 || selectedTags.length > 5) {
+      alert(`每篇文章必须选择 3-5 个标签！您目前选择了 ${selectedTags.length} 个标签。`);
+      return;
+    }
 
     setIsSaving(true);
     try {
       const now = new Date().toISOString();
+      const isScheduled = publishAt && new Date(publishAt) > new Date();
       
       let likes = 0;
       let likers: string[] = [];
+      let existingShortId = '';
 
       const postRef = doc(db, 'posts', currentPostIdRef.current);
       try {
@@ -135,8 +257,13 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
         if (snap.exists()) {
           likes = snap.data().likes || 0;
           likers = snap.data().likers || [];
+          existingShortId = snap.data().shortId || '';
         }
       } catch (_) {}
+
+      if (!existingShortId) {
+        existingShortId = Math.floor(100000 + Math.random() * 900000).toString();
+      }
 
       const payload = {
         id: currentPostIdRef.current,
@@ -144,22 +271,60 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
         content,
         authorId: user.firebaseUid,
         authorName: user.username,
+        authorAvatar: user.avatar || '',
         images: images,
+        coverImage: coverImage,
         likes,
         likers,
         status: 'published' as const,
         createdAt: now,
         updatedAt: now,
+        isR18: isR18,
+        tags: selectedTags,
+        publishAt: publishAt || null,
+        shortId: existingShortId,
       };
 
       try {
         await setDoc(postRef, payload);
+        const cacheKey = draftId ? `pending_draft_${user.firebaseUid}_${draftId}` : `pending_draft_${user.firebaseUid}_new`;
+        safeLocalStorage.removeItem(cacheKey);
+
+        // Notify followers of new published post (if published immediately)
+        if (!isScheduled) {
+          try {
+            const followsRef = collection(db, 'follows');
+            const q = query(followsRef, where('followingId', '==', user.firebaseUid));
+            const querySnapshot = await getDocs(q);
+            const notifyPromises = querySnapshot.docs.map((docSnap) => {
+              const followData = docSnap.data();
+              const notifPayload = {
+                recipientId: followData.followerId,
+                senderId: user.firebaseUid,
+                senderName: user.username,
+                senderAvatar: user.avatar || '',
+                type: 'new_post',
+                title: '关注作者发布了新博文',
+                body: `您关注的作者「${user.username}」发布了新文章《${title}》`,
+                postId: currentPostIdRef.current,
+                postTitle: title,
+                read: false,
+                createdAt: new Date().toISOString(),
+              };
+              return addDoc(collection(db, 'notifications'), notifPayload);
+            });
+            await Promise.all(notifyPromises);
+          } catch (notifErr) {
+            console.error("Failed to push notifications to followers:", notifErr);
+          }
+        }
+
       } catch (fError) {
         handleFirestoreError(fError, OperationType.WRITE, `posts/${currentPostIdRef.current}`);
       }
 
       setSaveStatus('saved');
-      alert("文章发布成功！");
+      alert(isScheduled ? `文章成功定时在 ${new Date(publishAt).toLocaleString()} 发布！` : "文章发布成功！");
       onNavigate('home');
     } catch (err: any) {
       console.error("Failed to publish post:", err);
@@ -181,17 +346,14 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
 
         e.preventDefault(); // Stop default paste action
 
-        // Start local reader or direct setup to upload it in the background
         const reader = new FileReader();
         reader.onloadend = async () => {
           const base64Url = reader.result as string;
-          // Put direct upload placeholder
           const placeholder = `\n![正在上传图片...](${base64Url})\n`;
           setContent((prev) => prev + placeholder);
 
-          // Find Cloudinary configs
-          const cloudName = localStorage.getItem('CLOUDINARY_CLOUD_NAME') || '';
-          const uploadPreset = localStorage.getItem('CLOUDINARY_UPLOAD_PRESET') || '';
+          const cloudName = safeLocalStorage.getItem('CLOUDINARY_CLOUD_NAME') || '';
+          const uploadPreset = safeLocalStorage.getItem('CLOUDINARY_UPLOAD_PRESET') || '';
 
           if (cloudName && uploadPreset) {
             try {
@@ -207,7 +369,6 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
               if (response.ok) {
                 const data = await response.json();
                 if (data.secure_url) {
-                  // Replace placeholder with secure Cloudinary URL
                   setContent((prev) => prev.replace(placeholder, `\n![粘贴图片](${data.secure_url})\n`));
                   setImages((prev) => [...prev, data.secure_url]);
                 }
@@ -230,15 +391,21 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
     setImages((prev) => prev.filter((_, idx) => idx !== indexToRemove));
   };
 
+  const toggleTag = (tag: string) => {
+    setSelectedTags((prev) =>
+      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+    );
+  };
+
   // Guard routing access: must be author/owner
   if (!user || (user.role !== 'author' && user.role !== 'owner')) {
     return (
-      <div className="max-w-xl mx-auto mt-20 p-8 text-center bg-white rounded-2xl border border-gray-100">
+      <div className="max-w-xl mx-auto mt-20 p-8 text-center bg-white rounded-2xl border border-gray-100 animate-fade-in">
         <h3 className="text-lg font-bold text-gray-900 font-display">无权访问</h3>
         <p className="text-gray-500 mt-2 text-sm">写作页仅限作者 (Author) 或管理员 (Owner) 访问。请联系站长开通权限。</p>
         <button
           onClick={() => onNavigate('home')}
-          className="mt-6 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-500 transition-colors"
+          className="mt-6 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-500 transition-colors cursor-pointer"
         >
           返回首页
         </button>
@@ -247,20 +414,20 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
+    <div className="max-w-5xl mx-auto px-4 py-8 animate-fade-in">
       {/* Header operations */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8 text-left">
         <div className="flex items-center gap-3">
           <button
             onClick={() => onNavigate('home')}
-            className="p-2 rounded-lg bg-white border border-gray-100 text-gray-500 hover:text-gray-700 transition-colors shadow-sm"
+            className="p-2 rounded-lg bg-white border border-gray-100 text-gray-500 hover:text-gray-700 transition-colors shadow-sm cursor-pointer"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
           <div>
-            <h1 className="text-2xl font-bold font-display text-gray-900">创作文章</h1>
-            <p className="text-sm text-gray-500">
-              撰写精彩内容，分享深刻见解。支持 Markdown 语法与图片粘贴。
+            <h1 className="text-2xl font-bold font-display text-gray-900">创作专栏博文</h1>
+            <p className="text-xs text-gray-500 mt-0.5">
+              撰写精彩内容，选择最应景的标签，或定时发布给您关注的读者们。
             </p>
           </div>
         </div>
@@ -271,28 +438,28 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
             {saveStatus === 'saving' && (
               <span className="flex items-center gap-1.5 text-indigo-600">
                 <Loader2 className="h-3 w-3 animate-spin" />
-                正在保存草稿...
+                正在自动备份草稿...
               </span>
             )}
             {saveStatus === 'saved' && (
               <span className="flex items-center gap-1.5 text-emerald-600 font-medium">
                 <CheckCircle className="h-3.5 w-3.5" />
-                保存于 {lastSaved || '刚刚'}
+                已备份于 {lastSaved || '刚刚'}
               </span>
             )}
             {saveStatus === 'error' && (
-              <span className="text-rose-600">草稿保存失败</span>
+              <span className="text-rose-600">云草稿自动备份失败</span>
             )}
             {saveStatus === 'idle' && lastSaved && (
-              <span className="text-gray-400">草稿已存</span>
+              <span className="text-gray-450">已存草稿</span>
             )}
           </span>
 
           <button
             type="button"
             onClick={handleManualSave}
-            title="手动保存草稿"
-            className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 hover:border-gray-300 rounded-lg text-xs font-semibold text-gray-600 bg-white transition-all hover:bg-gray-50"
+            title="手动保存云端草稿"
+            className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 hover:border-gray-350 rounded-lg text-xs font-semibold text-gray-600 bg-white transition-all hover:bg-gray-50 cursor-pointer shadow-2xs"
           >
             <Save className="h-3.5 w-3.5" />
             存草稿
@@ -301,10 +468,10 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
           <button
             onClick={handlePublish}
             disabled={isSaving}
-            className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-semibold hover:bg-indigo-500 transition-all shadow-sm active:scale-95 disabled:opacity-50"
+            className="flex items-center gap-1.5 px-4 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-semibold hover:bg-indigo-500 transition-all shadow-sm active:scale-95 disabled:opacity-50 cursor-pointer"
           >
             {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
-            发布文章
+            发布博文
           </button>
         </div>
       </div>
@@ -315,7 +482,7 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
           <input
             type="text"
             required
-            placeholder="文章标题..."
+            placeholder="请输入文章标题..."
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             className="w-full bg-white border border-gray-200 rounded-xl px-4 py-3 text-lg font-bold font-display text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
@@ -328,22 +495,22 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
                 <button
                   type="button"
                   onClick={() => setActiveTab('edit')}
-                  className={`flex items-center gap-1 px-4 py-2 text-xs font-medium border-b-2 transition-colors ${activeTab === 'edit' ? 'border-indigo-600 text-indigo-600 bg-white' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                  className={`flex items-center gap-1 px-4 py-2 text-xs font-medium border-b-2 transition-colors cursor-pointer ${activeTab === 'edit' ? 'border-indigo-600 text-indigo-600 bg-white font-bold' : 'border-transparent text-gray-500 hover:text-gray-75'}`}
                 >
                   <Edit3 className="h-3 w-3" />
-                  编辑
+                  编辑正文
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab('preview')}
-                  className={`flex items-center gap-1 px-4 py-2 text-xs font-medium border-b-2 transition-colors ${activeTab === 'preview' ? 'border-indigo-600 text-indigo-600 bg-white' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                  className={`flex items-center gap-1 px-4 py-2 text-xs font-medium border-b-2 transition-colors cursor-pointer ${activeTab === 'preview' ? 'border-indigo-600 text-indigo-600 bg-white font-bold' : 'border-transparent text-gray-500 hover:text-gray-75'}`}
                 >
                   <Eye className="h-3 w-3" />
-                  预览
+                  即时预览
                 </button>
               </div>
-              <span className="text-[10px] text-gray-400 px-3 cursor-default hidden sm:inline">
-                支持拖拽或粘贴图片
+              <span className="text-[10px] text-gray-400 px-3 cursor-default hidden sm:inline font-semibold">
+                支持直接拖拽、粘贴截图排版
               </span>
             </div>
 
@@ -352,77 +519,447 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
                 value={content}
                 onPaste={handlePaste}
                 onChange={(e) => setContent(e.target.value)}
-                placeholder="撰写你的故事、想法、见解... 点击上方预览可渲染 markdown！"
-                className="w-full min-h-[400px] border-none p-4 text-sm font-sans text-gray-700 resize-y focus:outline-none focus:ring-0 placeholder-gray-400 leading-relaxed"
+                placeholder="撰写你的故事、想法、同人设定或见解... 支持标准 Markdown 与直接粘贴外部图片！"
+                className="allow-paste w-full min-h-[420px] border-none p-4 text-sm font-sans text-gray-700 resize-y focus:outline-none focus:ring-0 placeholder-gray-400 leading-relaxed"
               />
             ) : (
-              <div className="p-6 prose max-w-none text-gray-800 min-h-[400px] bg-white overflow-y-auto">
+              <div className="p-6 prose max-w-none text-gray-800 min-h-[420px] bg-white overflow-y-auto text-left">
                 {content.trim() ? (
                   <div className="markdown-body">
-                    {/* Render with very clean elements */}
-                    <div className="markdown-body">
-                      {/* Simple direct renderer snippet or standard ReactMarkdown */}
-                      <div className="whitespace-pre-wrap leading-relaxed select-text font-serif">
-                        {content}
-                      </div>
+                    <div className="whitespace-pre-wrap leading-relaxed select-text font-serif text-sm">
+                      {content}
                     </div>
                   </div>
                 ) : (
-                  <p className="text-gray-400 text-sm italic">这里什么都还没有噢...</p>
+                  <p className="text-gray-400 text-xs italic">这里还没有内容，快在编辑标签中写几句吧！</p>
                 )}
               </div>
             )}
           </div>
         </div>
 
-        {/* Sidebar Image Upload Area */}
-        <div className="space-y-6">
-          <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm space-y-4">
-            <h3 className="text-sm font-bold text-gray-900 font-display flex items-center gap-1.5">
-              <ImageIcon className="h-4 w-4 text-gray-500" />
-              文章配图列表 ({images.length})
+        {/* Sidebar panels */}
+        <div className="space-y-6 text-left">
+          {/* Tags / Labels Selection */}
+          <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm space-y-3.5">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-bold text-gray-950 uppercase tracking-wider font-display flex items-center gap-1.5">
+                <Tag className="h-4 w-4 text-indigo-500" />
+                文章标签分类
+              </h3>
+              <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${selectedTags.length >= 3 && selectedTags.length <= 5 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-500'}`}>
+                {selectedTags.length} / 5
+              </span>
+            </div>
+
+            {/* Selected Tags Display */}
+            {selectedTags.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5 p-3 bg-gray-50/50 rounded-xl border border-gray-100">
+                {selectedTags.map((tag) => (
+                  <span
+                    key={tag}
+                    className="inline-flex items-center gap-1 pl-2.5 pr-1.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 text-xs font-bold border border-indigo-100/60 animate-in fade-in zoom-in-95 duration-100"
+                  >
+                    {tag}
+                    <button
+                      type="button"
+                      onClick={() => toggleTag(tag)}
+                      className="p-0.5 hover:bg-indigo-100 text-indigo-500 hover:text-indigo-800 rounded-md transition-colors cursor-pointer"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-4 bg-gray-50/50 border border-dashed border-gray-250 rounded-xl">
+                <span className="text-[11px] text-gray-400 font-medium">💡 暂未选择标签，请点击下方按钮选择</span>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => {
+                setTagSearchQuery('');
+                setActiveTagTab('全部');
+                setShowTagModal(true);
+              }}
+              className="w-full flex items-center justify-center gap-1.5 py-2.5 px-4 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 hover:text-indigo-700 rounded-xl text-xs font-bold transition-all border border-indigo-100/55 cursor-pointer shadow-3xs"
+            >
+              <Edit3 className="h-3.5 w-3.5" />
+              选择文章标签 (3-5个)
+            </button>
+          </div>
+
+          {/* Scheduled Publish Selector */}
+          <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm space-y-3.5">
+            <h3 className="text-xs font-bold text-gray-950 uppercase tracking-wider font-display flex items-center gap-1.5">
+              <Calendar className="h-4 w-4 text-indigo-500" />
+              发布时间与时机管理
             </h3>
-            <p className="text-xs text-gray-400">
-              这里上传的图片可以用作文章封面。同时，在左侧编辑框粘贴或拖入图片也能直接插入文章。
+            <p className="text-[11px] text-gray-400 leading-normal">
+              留空表示立即面向全体已签约读者进行广播。若设置一个未来的特定时刻，则文章只有到该指定时间时才会正式出现在主页。
+            </p>
+            <div className="space-y-1">
+              <input
+                type="datetime-local"
+                value={publishAt}
+                onChange={(e) => setPublishAt(e.target.value)}
+                className="block w-full rounded-xl border border-gray-200 p-2.5 text-xs text-gray-850 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100 font-medium font-mono"
+              />
+              {publishAt && (
+                <div className="flex items-center justify-between text-[10px] text-gray-450 pt-1">
+                  <span>预计：{new Date(publishAt).toLocaleString()}</span>
+                  <button
+                    type="button"
+                    onClick={() => setPublishAt('')}
+                    className="text-rose-600 hover:underline font-bold"
+                  >
+                    重置为立即发布
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Sidebar Image Upload Area */}
+          <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm space-y-4">
+            <h3 className="text-xs font-bold text-gray-950 uppercase tracking-wider font-display flex items-center gap-1.5">
+              <ImageIcon className="h-4 w-4 text-indigo-500" />
+              文章配图 & 封面管理 ({images.length})
+            </h3>
+            <p className="text-[11px] text-gray-400">
+              您可以拖拽/粘贴/上传最多多张高清配图。默认第一张会自动作为封面卡片的背景噢。
             </p>
 
             <ImageUploader
-              label="添加附属封面图"
+              label="添加高清配图"
               onUploadSuccess={handleAuxImageAdded}
+              enableCrop={false}
             />
 
             {images.length > 0 && (
-              <div className="grid grid-cols-2 gap-2 pt-2">
-                {images.map((img, idx) => (
-                  <div key={idx} className="group relative aspect-video rounded-lg overflow-hidden border border-gray-100">
-                    <img src={img} alt="Post Attachment" className="w-full h-full object-cover" />
+              <div className="border-t border-gray-100 pt-3 space-y-3">
+                <h4 className="text-[11px] font-bold text-gray-800 uppercase tracking-wider font-display flex items-center gap-1.5">
+                  <Crop className="h-3.5 w-3.5 text-indigo-500" />
+                  自主裁剪/更换列表封面
+                </h4>
+
+                <div className="bg-gray-50/75 p-3 rounded-xl border border-gray-100 flex flex-col items-center gap-2.5">
+                  <div className="relative aspect-video w-full max-w-[180px] rounded-lg overflow-hidden border border-gray-200 bg-white">
+                    <img 
+                      src={coverImage || images[0]} 
+                      alt="Current Cover" 
+                      className="w-full h-full object-cover" 
+                    />
+                    <div className="absolute top-1 left-1 bg-indigo-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow-xs">
+                      选定封面
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 w-full justify-center">
                     <button
                       type="button"
-                      onClick={() => removeAuxImage(idx)}
-                      className="absolute top-1 right-1 p-1 rounded-full bg-red-600/80 hover:bg-red-600 text-white opacity-0 group-hover:opacity-100 transition-opacity outline-none text-[10px]"
+                      onClick={() => setCroppingCoverUrl(coverImage || images[0])}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-bold shadow-xs transition-colors cursor-pointer"
                     >
-                      删除
+                      <Crop className="h-3 w-3" />
+                      自由裁切
                     </button>
-                    <span className="absolute bottom-1 left-1 bg-black/50 text-white text-[9px] px-1 py-0.5 rounded">
-                      封面图 {idx + 1}
-                    </span>
+                    {coverImage && (
+                      <button
+                        type="button"
+                        onClick={() => setCoverImage('')}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-gray-200 hover:border-gray-300 text-gray-650 bg-white rounded-lg text-[10px] font-bold transition-all cursor-pointer"
+                      >
+                        <RotateCcw className="h-3 w-3" />
+                        重置原始
+                      </button>
+                    )}
                   </div>
-                ))}
+                </div>
+
+                <div className="space-y-1 pt-1">
+                  <span className="text-[10px] font-bold text-gray-500 block">点击缩略图选择展示封面：</span>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {images.map((img, idx) => {
+                      const isSelected = (coverImage === img || (!coverImage && idx === 0));
+                      return (
+                        <div key={idx} className="relative aspect-square rounded-md overflow-hidden border group">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCoverImage(img);
+                            }}
+                            className={`w-full h-full p-0 border-0 outline-none transition-all ${
+                              isSelected 
+                                ? 'ring-2 ring-indigo-600 opacity-100' 
+                                : 'opacity-60 hover:opacity-100'
+                            }`}
+                          >
+                            <img src={img} alt={`Img ${idx}`} className="w-full h-full object-cover" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeAuxImage(idx)}
+                            className="absolute top-0.5 right-0.5 p-0.5 rounded-full bg-red-650 hover:bg-red-700 text-white opacity-0 group-hover:opacity-100 transition-opacity outline-none text-[8px]"
+                            title="从文章中移除此图片"
+                          >
+                            X
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             )}
           </div>
 
-          <div className="bg-gray-50 p-4 rounded-xl border border-gray-200/50">
-            <h4 className="text-xs font-semibold text-gray-700 font-display mb-1.5">💡 小窍门 (Markdown 支持)</h4>
-            <ul className="text-[11px] text-gray-500 space-y-1 list-disc list-inside leading-relaxed">
-              <li>使用 <code className="bg-gray-100 px-1 rounded text-red-500"># 标题</code> 增加主标题</li>
-              <li>使用 <code className="bg-gray-100 px-1 rounded text-red-500">## 标题</code> 增加二级标题</li>
-              <li>使用 <code className="bg-gray-100 px-1 rounded text-red-500">**加粗**</code> 将字形加粗</li>
-              <li>在左侧直接 <kbd className="bg-gray-100 px-1 rounded font-mono shadow-sm">Ctrl+V</kbd> 粘贴外部截图，即可快速上传与排版噢！</li>
-            </ul>
+          {/* R18 Content Rating Panel */}
+          <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm space-y-4">
+            <h3 className="text-xs font-bold text-gray-950 uppercase tracking-wider font-display flex items-center gap-1.5">
+              <ShieldAlert className="h-4 w-4 text-rose-500 shrink-0" />
+              受众分级过滤设置
+            </h3>
+            <p className="text-[11px] text-gray-400 leading-normal">
+              为营造健康自主的安全环境，若文章包含任何成人（18+）、极端虐心等特定情节，请务必标记为 R18 级。
+            </p>
+
+            <div className="grid grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                onClick={() => setIsR18(false)}
+                className={`py-2 px-3 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
+                  !isR18 
+                    ? 'bg-indigo-50 border-indigo-200 text-indigo-700 shadow-2xs font-bold' 
+                    : 'border-gray-200 text-gray-500 hover:bg-gray-50'
+                }`}
+              >
+                全年龄 (All Ages)
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsR18(true)}
+                className={`py-2 px-3 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
+                  isR18 
+                    ? 'bg-rose-50 border-rose-200 text-rose-700 shadow-2xs font-bold' 
+                    : 'border-gray-200 text-gray-500 hover:bg-gray-50'
+                }`}
+              >
+                R18 (限制级)
+              </button>
+            </div>
           </div>
         </div>
       </div>
+
+      {/* Cropper Modal for Custom Cover adjustment */}
+      {croppingCoverUrl && (
+        <ImageCropper
+          imageSrc={croppingCoverUrl}
+          onCropComplete={(croppedBase64) => {
+            setCoverImage(croppedBase64);
+            setCroppingCoverUrl(null);
+          }}
+          onCancel={() => {
+            setCroppingCoverUrl(null);
+          }}
+        />
+      )}
+
+      {/* Premium Tag Selector Modal */}
+      {showTagModal && (
+        <div className="fixed inset-0 bg-zinc-950/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-3xl max-w-2xl w-full border border-gray-100 shadow-2xl flex flex-col h-[85vh] max-h-[680px] overflow-hidden animate-in fade-in zoom-in-95 duration-150 text-left">
+            
+            {/* Header */}
+            <div className="p-6 border-b border-gray-100 flex items-start justify-between shrink-0">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="p-1.5 bg-indigo-50 text-indigo-600 rounded-xl">
+                    <Tag className="h-5 w-5" />
+                  </span>
+                  <h3 className="text-base font-bold text-gray-900 font-display">选择文章标签分类</h3>
+                </div>
+                <p className="text-xs text-gray-400 mt-1">
+                  选择贴切的标签能够显著提升读者浏览与精准推荐效率。请从以下分类中选择 <span className="font-bold text-indigo-600">3-5 个标签</span>。
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowTagModal(false)}
+                className="p-1.5 rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Sub-header Controls: Search & Category tabs */}
+            <div className="px-6 py-4 bg-gray-50/50 border-b border-gray-100 space-y-3.5 shrink-0">
+              {/* Search Bar */}
+              <div className="relative">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="搜索标签（例如：师徒、微肉、古代、甜...）"
+                  value={tagSearchQuery}
+                  onChange={(e) => setTagSearchQuery(e.target.value)}
+                  className="block w-full rounded-2xl border border-gray-200 pl-10 pr-4 py-2.5 text-xs text-gray-800 bg-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-100/50 focus:border-indigo-300 transition-all font-medium"
+                />
+                {tagSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setTagSearchQuery('')}
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 p-0.5 rounded-md hover:bg-gray-100 text-gray-400 hover:text-gray-650 cursor-pointer"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Category tabs */}
+              {!tagSearchQuery && (
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                  {['全部', ...Object.keys(TAG_CATEGORIES)].map((category) => (
+                    <button
+                      key={category}
+                      type="button"
+                      onClick={() => setActiveTagTab(category)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                        activeTagTab === category
+                          ? 'bg-indigo-600 text-white shadow-3xs'
+                          : 'bg-white border border-gray-200 text-gray-550 hover:bg-gray-100'
+                      }`}
+                    >
+                      {category}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Scrollable Tags Area */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              {tagSearchQuery ? (
+                // Search Results
+                <div className="space-y-3">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                    搜索结果 ({
+                      AVAILABLE_TAGS.filter(tag => tag.includes(tagSearchQuery)).length
+                    } 个标签)
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    {AVAILABLE_TAGS.filter(tag => tag.includes(tagSearchQuery)).map((tag) => {
+                      const isSelected = selectedTags.includes(tag);
+                      return (
+                        <button
+                          key={tag}
+                          type="button"
+                          onClick={() => toggleTag(tag)}
+                          className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 cursor-pointer ${
+                            isSelected
+                              ? 'bg-indigo-600 border-indigo-700 text-white shadow-xs'
+                              : 'bg-white border-gray-200 text-gray-650 hover:bg-gray-50'
+                          }`}
+                        >
+                          {tag}
+                          {isSelected && <Check className="h-3.5 w-3.5 text-indigo-200" />}
+                        </button>
+                      );
+                    })}
+                    {AVAILABLE_TAGS.filter(tag => tag.includes(tagSearchQuery)).length === 0 && (
+                      <p className="text-xs text-gray-450 italic py-4 w-full text-center">
+                        没有找到匹配「{tagSearchQuery}」的标签，换个词试试吧
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                // Categorized list, filtered by active tab
+                Object.entries(TAG_CATEGORIES)
+                  .filter(([categoryName]) => activeTagTab === '全部' || activeTagTab === categoryName)
+                  .map(([categoryName, tags]) => (
+                    <div key={categoryName} className="space-y-2.5">
+                      <span className="inline-flex items-center text-[10px] font-bold text-indigo-500 font-sans tracking-wide bg-indigo-50/70 px-2 py-0.5 rounded">
+                        {categoryName}
+                      </span>
+                      <div className="flex flex-wrap gap-2">
+                        {tags.map((tag) => {
+                          const isSelected = selectedTags.includes(tag);
+                          return (
+                            <button
+                              key={tag}
+                              type="button"
+                              onClick={() => toggleTag(tag)}
+                              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 cursor-pointer ${
+                                isSelected
+                                  ? 'bg-indigo-600 border-indigo-700 text-white shadow-xs'
+                                  : 'bg-white border-gray-200 text-gray-650 hover:bg-gray-50'
+                              }`}
+                            >
+                              {tag}
+                              {isSelected && <Check className="h-3.5 w-3.5 text-indigo-200" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-6 border-t border-gray-100 bg-gray-50/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 shrink-0">
+              <div className="space-y-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-gray-500 font-semibold">当前已选择:</span>
+                  <span className={`text-xs font-bold ${
+                    selectedTags.length >= 3 && selectedTags.length <= 5 ? 'text-emerald-600' : 'text-rose-500'
+                  }`}>
+                    {selectedTags.length} 个标签 {selectedTags.length < 3 && '(最少 3 个)'} {selectedTags.length > 5 && '(最多 5 个)'}
+                  </span>
+                </div>
+                {/* Micro-preview of selected items in footer */}
+                <div className="flex flex-wrap gap-1 max-w-md">
+                  {selectedTags.map(tag => (
+                    <span key={tag} className="inline-flex items-center text-[9px] font-bold bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded-md border border-indigo-100/50">
+                      {tag}
+                    </span>
+                  ))}
+                  {selectedTags.length === 0 && (
+                    <span className="text-[10px] text-gray-400 italic">未选择任何标签</span>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedTags([]);
+                  }}
+                  className="px-4 py-2 border border-gray-250 hover:bg-gray-100 text-gray-650 hover:text-gray-800 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+                >
+                  清空已选
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowTagModal(false)}
+                  className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                    selectedTags.length >= 3 && selectedTags.length <= 5
+                      ? 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm'
+                      : 'bg-indigo-600/50 text-white/95 hover:bg-indigo-600'
+                  }`}
+                >
+                  确认并应用 ({selectedTags.length}个)
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
     </div>
   );
 }

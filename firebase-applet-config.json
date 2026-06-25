@@ -1,10 +1,10 @@
 {
-  "projectId": "elite-ridge-b8gvj",
-  "appId": "1:623354552348:web:04fa96c1c35158cdf77fd9",
-  "apiKey": "AIzaSyB7-Q9CAWRLDjI6xfHVaAc3rsDeI4JKR9w",
-  "authDomain": "elite-ridge-b8gvj.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-e411267d-0b8f-4dd3-b136-04dd61a44ffd",
-  "storageBucket": "elite-ridge-b8gvj.firebasestorage.app",
-  "messagingSenderId": "623354552348",
-  "measurementId": ""
+  "projectId": "secret-reading",
+  "appId": "1:1071172219377:web:7998d9fb76bbb9303f1450",
+  "apiKey": "AIzaSyDt-JP_yIy2amy_SJjpV7RawDf8yR9wLmw",
+  "authDomain": "secret-reading.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
+  "storageBucket": "secret-reading.firebasestorage.app",
+  "messagingSenderId": "1071172219377",
+  "measurementId": "G-ZTVQP3G9YX"
 }

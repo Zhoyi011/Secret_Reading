@@ -13,14 +13,17 @@ export interface MongoUserDoc {
   role: string;
   updatedAt: string;
   __v: number;
+  filterR18?: boolean;
 }
+
+import { safeLocalStorage } from '../utils/safeStorage';
 
 class MongoClientSimulator {
   private dbName = "私密阅读平台_MongoDB";
 
   private getCollection<T>(collectionName: string): T[] {
     try {
-      const data = localStorage.getItem(`${this.dbName}_${collectionName}`);
+      const data = safeLocalStorage.getItem(`${this.dbName}_${collectionName}`);
       return data ? JSON.parse(data) : [];
     } catch (e) {
       console.error("MongoDB failed to read collection:", e);
@@ -30,7 +33,7 @@ class MongoClientSimulator {
 
   private saveCollection<T>(collectionName: string, data: T[]): void {
     try {
-      localStorage.setItem(`${this.dbName}_${collectionName}`, JSON.stringify(data));
+      safeLocalStorage.setItem(`${this.dbName}_${collectionName}`, JSON.stringify(data));
     } catch (e) {
       console.error("MongoDB failed to write collection:", e);
     }
