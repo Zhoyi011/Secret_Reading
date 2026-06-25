@@ -84,7 +84,7 @@ export default function Login({ onNavigate, onSuccess }: LoginProps) {
             <BookOpen className="h-6 w-6" />
           </div>
           <h2 className="font-display text-2xl font-bold tracking-tight text-gray-900">
-            欢迎回到刻晴No.95 & 阮·梅No.230的私密阅读空间~
+            欢迎回到私密阅读空间~
           </h2>
           <p className="mt-2 text-sm text-gray-500 font-medium max-w-xs">
             请通过 Google 账户登录。

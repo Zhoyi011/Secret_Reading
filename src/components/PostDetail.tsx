@@ -848,7 +848,7 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
                 onClick={() => setIsR18Expanded(true)}
                 className="px-6 py-2.5 bg-red-650 hover:bg-red-700 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-red-600/10 cursor-pointer"
               >
-                我已年满18周岁，确认展开内容 ➔
+                确认展开内容 ➔
               </button>
             </div>
           ) : (
