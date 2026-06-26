@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { doc, getDoc, updateDoc, deleteDoc, setDoc, addDoc, collection, getDocs, query, where } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { AppUser, Post } from '../types';
-import { ArrowLeft, Save, Play, Loader2, Image as ImageIcon, Crop, RotateCcw, Edit3, Eye, ShieldAlert, CheckCircle, Tag, Calendar, Search, Check, X } from 'lucide-react';
+import { ArrowLeft, Save, Play, Loader2, Image as ImageIcon, Crop, RotateCcw, Edit3, Eye, ShieldAlert, CheckCircle, Tag, Calendar, Search, Check, X, Plus, BookOpen } from 'lucide-react';
 import ImageUploader from './ImageUploader';
 import ImageCropper from './ImageCropper';
 
@@ -62,6 +62,33 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
   const [tagSearchQuery, setTagSearchQuery] = useState('');
   const [activeTagTab, setActiveTagTab] = useState<string>('全部');
   const [publishAt, setPublishAt] = useState<string>('');
+  const [isPinned, setIsPinned] = useState<boolean>(false);
+
+  // Series/连载 states
+  const [seriesId, setSeriesId] = useState('');
+  const [seriesTitle, setSeriesTitle] = useState('');
+  const [seriesOrder, setSeriesOrder] = useState<number>(1);
+  const [authorSeries, setAuthorSeries] = useState<any[]>([]);
+  const [isCreatingNewSeries, setIsCreatingNewSeries] = useState(false);
+  const [newSeriesTitle, setNewSeriesTitle] = useState('');
+  const [newSeriesDesc, setNewSeriesDesc] = useState('');
+  const [creatingSeriesLoading, setCreatingSeriesLoading] = useState(false);
+
+  // Fetch author series
+  useEffect(() => {
+    if (!user) return;
+    const loadAuthorSeries = async () => {
+      try {
+        const q = query(collection(db, 'series'), where('authorId', '==', user.firebaseUid));
+        const snap = await getDocs(q);
+        const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setAuthorSeries(list);
+      } catch (err) {
+        console.error("Failed to load author series list:", err);
+      }
+    };
+    loadAuthorSeries();
+  }, [user]);
 
   const currentPostIdRef = useRef<string>(draftId || doc(collection(db, 'posts')).id);
   const isCreatingProfileRef = useRef<boolean>(false);
@@ -79,6 +106,10 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
       let dbIsR18 = false;
       let dbTags: string[] = [];
       let dbPublishAt = '';
+      let dbIsPinned = false;
+      let dbSeriesId = '';
+      let dbSeriesTitle = '';
+      let dbSeriesOrder = 1;
 
       if (draftId) {
         try {
@@ -94,6 +125,10 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
             dbIsR18 = data.isR18 || false;
             dbTags = data.tags || [];
             dbPublishAt = data.publishAt || '';
+            dbIsPinned = data.isPinned || false;
+            dbSeriesId = data.seriesId || '';
+            dbSeriesTitle = data.seriesTitle || '';
+            dbSeriesOrder = data.seriesOrder !== undefined ? data.seriesOrder : 1;
             currentPostIdRef.current = draftId;
           }
         } catch (err) {
@@ -138,7 +173,11 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
       setIsR18(dbIsR18);
       setSelectedTags(dbTags);
       setPublishAt(dbPublishAt);
+      setIsPinned(dbIsPinned);
       setStatus(dbStatus);
+      setSeriesId(dbSeriesId);
+      setSeriesTitle(dbSeriesTitle);
+      setSeriesOrder(dbSeriesOrder);
     };
 
     loadPost();
@@ -157,10 +196,14 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
         isR18,
         tags: selectedTags,
         publishAt,
+        isPinned,
+        seriesId,
+        seriesTitle,
+        seriesOrder,
         updatedAt: new Date().toISOString()
       }));
     }
-  }, [title, content, images, coverImage, isR18, selectedTags, publishAt, user, draftId]);
+  }, [title, content, images, coverImage, isR18, selectedTags, publishAt, isPinned, seriesId, seriesTitle, seriesOrder, user, draftId]);
 
   // Autosave timer: every 30 seconds to the cloud Firestore DB
   useEffect(() => {
@@ -207,7 +250,11 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
         isR18: isR18,
         tags: selectedTags,
         publishAt: publishAt || null,
+        isPinned: isPinned || false,
         shortId: existingShortId,
+        seriesId: seriesId || null,
+        seriesTitle: seriesId ? seriesTitle : null,
+        seriesOrder: seriesId ? Number(seriesOrder) || 1 : null,
       };
 
       await setDoc(postRef, payload, { merge: true });
@@ -282,7 +329,11 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
         isR18: isR18,
         tags: selectedTags,
         publishAt: publishAt || null,
+        isPinned: isPinned || false,
         shortId: existingShortId,
+        seriesId: seriesId || null,
+        seriesTitle: seriesId ? seriesTitle : null,
+        seriesOrder: seriesId ? Number(seriesOrder) || 1 : null,
       };
 
       try {
@@ -538,23 +589,16 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
           </div>
         </div>
 
-        {/* Sidebar panels */}
-        <div className="space-y-6 text-left">
-          {/* Tags / Labels Selection */}
-          <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm space-y-3.5">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs font-bold text-gray-950 uppercase tracking-wider font-display flex items-center gap-1.5">
-                <Tag className="h-4 w-4 text-indigo-500" />
-                文章标签分类
-              </h3>
-              <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${selectedTags.length >= 3 && selectedTags.length <= 5 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-500'}`}>
-                {selectedTags.length} / 5
-              </span>
-            </div>
-
-            {/* Selected Tags Display */}
+        {/* Sidebar */}
+        <div className="space-y-6">
+          {/* Tags Panel */}
+          <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm space-y-4">
+            <h3 className="text-xs font-bold text-gray-950 uppercase tracking-wider font-display flex items-center gap-1.5">
+              <Tag className="h-4 w-4 text-indigo-500" />
+              文章分类标签
+            </h3>
             {selectedTags.length > 0 ? (
-              <div className="flex flex-wrap gap-1.5 p-3 bg-gray-50/50 rounded-xl border border-gray-100">
+              <div className="flex flex-wrap gap-1.5">
                 {selectedTags.map((tag) => (
                   <span
                     key={tag}
@@ -564,7 +608,7 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
                     <button
                       type="button"
                       onClick={() => toggleTag(tag)}
-                      className="p-0.5 hover:bg-indigo-100 text-indigo-500 hover:text-indigo-800 rounded-md transition-colors cursor-pointer"
+                      className="p-0.5 hover:bg-indigo-100 text-indigo-500 hover:text-indigo-800 rounded-md transition-colors"
                     >
                       <X className="h-3 w-3" />
                     </button>
@@ -572,42 +616,56 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
                 ))}
               </div>
             ) : (
-              <div className="text-center py-4 bg-gray-50/50 border border-dashed border-gray-250 rounded-xl">
-                <span className="text-[11px] text-gray-400 font-medium">💡 暂未选择标签，请点击下方按钮选择</span>
-              </div>
+              <p className="text-gray-400 text-[11px] italic">点击下方按钮添加文章分类标签，最多 5 个</p>
             )}
 
             <button
               type="button"
-              onClick={() => {
-                setTagSearchQuery('');
-                setActiveTagTab('全部');
-                setShowTagModal(true);
-              }}
-              className="w-full flex items-center justify-center gap-1.5 py-2.5 px-4 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 hover:text-indigo-700 rounded-xl text-xs font-bold transition-all border border-indigo-100/55 cursor-pointer shadow-3xs"
+              onClick={() => setShowTagModal(true)}
+              className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-gray-50 hover:bg-gray-100 text-gray-600 hover:text-gray-850 rounded-xl text-xs font-bold transition-all border border-gray-200/60 cursor-pointer shadow-3xs"
             >
-              <Edit3 className="h-3.5 w-3.5" />
-              选择文章标签 (3-5个)
+              <Plus className="h-3.5 w-3.5 text-indigo-500" />
+              选择分类标签
             </button>
           </div>
 
-          {/* Scheduled Publish Selector */}
-          <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm space-y-3.5">
+          {/* Author Signing and High-level Permissions Panel */}
+          <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm space-y-4">
             <h3 className="text-xs font-bold text-gray-950 uppercase tracking-wider font-display flex items-center gap-1.5">
               <Calendar className="h-4 w-4 text-indigo-500" />
-              发布时间与时机管理
+              高级发布与文章管理
             </h3>
-            <p className="text-[11px] text-gray-400 leading-normal">
-              留空表示立即面向全体已签约读者进行广播。若设置一个未来的特定时刻，则文章只有到该指定时间时才会正式出现在主页。
-            </p>
-            <div className="space-y-1">
+            
+            {/* Author Level Badge */}
+            <div className="p-3 bg-gray-50 rounded-xl border border-gray-100 flex items-center justify-between">
+              <span className="text-[11px] font-bold text-gray-500">当前创作者签约等级:</span>
+              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                user?.level === 'vip' ? 'bg-amber-100 text-amber-800 border border-amber-200' :
+                user?.level === 'signed' ? 'bg-indigo-100 text-indigo-800 border border-indigo-200' :
+                'bg-gray-100 text-gray-700'
+              }`}>
+                {user?.level === 'vip' ? '👑 特邀作家' :
+                 user?.level === 'signed' ? '✒️ 签约作家' :
+                 '📖 普通作者'}
+              </span>
+            </div>
+
+            {/* Scheduled Publish Section */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-bold text-gray-700">定时发布时间</label>
+                {(user?.level !== 'signed' && user?.level !== 'vip') && (
+                  <span className="text-[9px] text-indigo-600 bg-indigo-50 font-semibold px-1.5 py-0.5 rounded">🔒 签约专属</span>
+                )}
+              </div>
               <input
                 type="datetime-local"
+                disabled={user?.level !== 'signed' && user?.level !== 'vip'}
                 value={publishAt}
                 onChange={(e) => setPublishAt(e.target.value)}
-                className="block w-full rounded-xl border border-gray-200 p-2.5 text-xs text-gray-850 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100 font-medium font-mono"
+                className="block w-full rounded-xl border border-gray-200 p-2.5 text-xs text-gray-850 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100 font-medium font-mono disabled:opacity-55 disabled:bg-gray-50/50"
               />
-              {publishAt && (
+              {publishAt && (user?.level === 'signed' || user?.level === 'vip') && (
                 <div className="flex items-center justify-between text-[10px] text-gray-450 pt-1">
                   <span>预计：{new Date(publishAt).toLocaleString()}</span>
                   <button
@@ -617,6 +675,167 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
                   >
                     重置为立即发布
                   </button>
+                </div>
+              )}
+            </div>
+
+            {/* Pinned to Top Section */}
+            <div className="border-t border-gray-100 pt-3.5 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-bold text-gray-700">作品置顶选项</label>
+                {user?.level !== 'vip' && (
+                  <span className="text-[9px] text-amber-600 bg-amber-50 font-semibold px-1.5 py-0.5 rounded">🔒 特邀专属</span>
+                )}
+              </div>
+              
+              <label className="flex items-center gap-2 p-2.5 rounded-xl border border-gray-150/80 hover:bg-gray-50/30 transition-all cursor-pointer">
+                <input
+                  type="checkbox"
+                  disabled={user?.level !== 'vip'}
+                  checked={isPinned}
+                  onChange={(e) => setIsPinned(e.target.checked)}
+                  className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4 border-gray-300 disabled:opacity-50"
+                />
+                <div className="text-left">
+                  <span className="block text-xs font-bold text-gray-800">在您的个人主页置顶显示</span>
+                  <span className="block text-[9px] text-gray-400">将本作品永久固定在您的主页作品列表顶端。</span>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          {/* Series / Serialization Setup Panel */}
+          <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm space-y-4">
+            <h3 className="text-xs font-bold text-gray-950 uppercase tracking-wider font-display flex items-center gap-1.5">
+              <BookOpen className="h-4 w-4 text-indigo-500" />
+              系列与连载设定
+            </h3>
+            <p className="text-[11px] text-gray-400 leading-normal">
+              可以将此文归属于您创建的特定小说系列中（如《星落》），以支持上一章/下一章导航和系列目录展示。
+            </p>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-bold text-gray-700 mb-1">选择隶属系列</label>
+                <select
+                  value={seriesId}
+                  onChange={(e) => {
+                    const selId = e.target.value;
+                    setSeriesId(selId);
+                    if (selId === '') {
+                      setSeriesTitle('');
+                    } else {
+                      const found = authorSeries.find(s => s.id === selId);
+                      setSeriesTitle(found ? found.title : '');
+                    }
+                  }}
+                  className="block w-full rounded-xl border border-gray-200 p-2.5 text-xs text-gray-805 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100 font-medium"
+                >
+                  <option value="">-- 不关联系列 (独立作品) --</option>
+                  {authorSeries.map((s) => (
+                    <option key={s.id} value={s.id}>《{s.title}》</option>
+                  ))}
+                </select>
+              </div>
+
+              {seriesId && (
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-700 mb-1">章节排序序号 (如第 1 篇、第 2 篇)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={seriesOrder}
+                    onChange={(e) => setSeriesOrder(Math.max(1, Number(e.target.value) || 1))}
+                    className="block w-full rounded-xl border border-gray-200 p-2.5 text-xs text-gray-850 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100 font-medium font-mono"
+                  />
+                  <p className="text-[9px] text-gray-400 mt-1">
+                    系统将根据该数字从小到大排列连载文章并生成导航。
+                  </p>
+                </div>
+              )}
+
+              {/* Create New Series Action */}
+              {!isCreatingNewSeries ? (
+                <button
+                  type="button"
+                  onClick={() => setIsCreatingNewSeries(true)}
+                  className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-gray-50 hover:bg-gray-100 text-gray-600 hover:text-gray-850 rounded-xl text-xs font-bold transition-all border border-gray-200/60 cursor-pointer shadow-3xs"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  新建小说/文章系列
+                </button>
+              ) : (
+                <div className="bg-gray-50/50 p-4.5 rounded-xl border border-gray-200/60 space-y-3 animate-in fade-in zoom-in-95 duration-150">
+                  <h4 className="text-[11px] font-bold text-gray-800 flex items-center justify-between">
+                    <span>新建系列专栏</span>
+                    <button
+                      type="button"
+                      onClick={() => setIsCreatingNewSeries(false)}
+                      className="text-gray-400 hover:text-gray-600 font-bold"
+                    >
+                      取消
+                    </button>
+                  </h4>
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      placeholder="系列名称 (如：星落)"
+                      value={newSeriesTitle}
+                      onChange={(e) => setNewSeriesTitle(e.target.value)}
+                      className="block w-full rounded-lg border border-gray-200 p-2 text-xs text-gray-850 bg-white focus:outline-none"
+                    />
+                    <textarea
+                      placeholder="系列简介，简要介绍这一连载故事..."
+                      value={newSeriesDesc}
+                      onChange={(e) => setNewSeriesDesc(e.target.value)}
+                      className="block w-full rounded-lg border border-gray-200 p-2 text-xs text-gray-850 bg-white focus:outline-none h-16 resize-none"
+                    />
+                    <button
+                      type="button"
+                      disabled={creatingSeriesLoading}
+                      onClick={async () => {
+                        if (!newSeriesTitle.trim()) {
+                          alert("请输入系列名称");
+                          return;
+                        }
+                        setCreatingSeriesLoading(true);
+                        try {
+                          const newRef = doc(collection(db, 'series'));
+                          await setDoc(newRef, {
+                            id: newRef.id,
+                            title: newSeriesTitle.trim(),
+                            description: newSeriesDesc.trim(),
+                            authorId: user.firebaseUid,
+                            authorName: user.username,
+                            createdAt: new Date().toISOString()
+                          });
+                          
+                          // Refresh series
+                          const q = query(collection(db, 'series'), where('authorId', '==', user.firebaseUid));
+                          const snap = await getDocs(q);
+                          const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                          setAuthorSeries(list);
+                          
+                          // Select the newly created series
+                          setSeriesId(newRef.id);
+                          setSeriesTitle(newSeriesTitle.trim());
+                          
+                          // Clear state
+                          setNewSeriesTitle('');
+                          setNewSeriesDesc('');
+                          setIsCreatingNewSeries(false);
+                        } catch (err) {
+                          console.error("Failed to create series:", err);
+                          alert("创建系列失败，请检查数据库权限或重试");
+                        } finally {
+                          setCreatingSeriesLoading(false);
+                        }
+                      }}
+                      className="w-full py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-all disabled:opacity-50 cursor-pointer shadow-3xs"
+                    >
+                      {creatingSeriesLoading ? "正在创建..." : "确认创建系列"}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

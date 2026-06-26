@@ -86,9 +86,34 @@
           "type": "string",
           "format": "date-time",
           "description": "Last update timestamp"
+        },
+        "seriesId": {
+          "type": "string",
+          "description": "The unique ID of the series/novel the article belongs to"
+        },
+        "seriesTitle": {
+          "type": "string",
+          "description": "The title of the series/novel"
+        },
+        "seriesOrder": {
+          "type": "integer",
+          "description": "Chapter sequencing order inside the series"
         }
       },
       "required": ["title", "content", "authorId", "authorName", "status", "createdAt", "updatedAt"]
+    },
+    "Series": {
+      "title": "Novel Series / Serialization Column",
+      "description": "Sequenced serialization column/book folder created by author or owner",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "The title of the series" },
+        "description": { "type": "string", "description": "Short bio/summary of the series" },
+        "authorId": { "type": "string", "description": "Author owner's UID" },
+        "authorName": { "type": "string", "description": "Author owner's name" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" }
+      },
+      "required": ["title", "description", "authorId", "authorName", "createdAt"]
     },
     "Follow": {
       "title": "User Follow Relationship",
@@ -155,6 +180,63 @@
         "createdAt": { "type": "string", "format": "date-time", "description": "Application submission timestamp" }
       },
       "required": ["userId", "username", "email", "bio", "status", "createdAt"]
+    },
+    "WritingSubscription": {
+      "title": "Author Writing Plan Subscription",
+      "description": "Indicates when a user subscribes to an author's update schedules and punch-in alerts",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "The subscriber's UID" },
+        "username": { "type": "string", "description": "The subscriber's username" },
+        "authorId": { "type": "string", "description": "The author's UID" },
+        "authorName": { "type": "string", "description": "The author's username" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Subscription timestamp" }
+      },
+      "required": ["userId", "username", "authorId", "authorName", "createdAt"]
+    },
+    "Comment": {
+      "title": "Post Comment",
+      "description": "Comments and author replies on a post",
+      "type": "object",
+      "properties": {
+        "postId": { "type": "string", "description": "ID of the associated post" },
+        "userId": { "type": "string", "description": "UID of the commenter" },
+        "username": { "type": "string", "description": "Username of the commenter" },
+        "avatar": { "type": "string", "description": "Avatar of the commenter" },
+        "content": { "type": "string", "description": "Body text of the comment" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" },
+        "replies": { "type": "array", "description": "Author or moderator replies" }
+      },
+      "required": ["postId", "userId", "username", "content", "createdAt"]
+    },
+    "Message": {
+      "title": "Private Message",
+      "description": "Private direct letters between users",
+      "type": "object",
+      "properties": {
+        "senderId": { "type": "string", "description": "UID of the message sender" },
+        "senderName": { "type": "string", "description": "Name of the message sender" },
+        "senderAvatar": { "type": "string", "description": "Avatar of the message sender" },
+        "recipientId": { "type": "string", "description": "UID of the message recipient" },
+        "recipientName": { "type": "string", "description": "Name of the message recipient" },
+        "recipientAvatar": { "type": "string", "description": "Avatar of the message recipient" },
+        "body": { "type": "string", "description": "Content body of the direct message" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" },
+        "read": { "type": "boolean", "description": "Unread indicator" }
+      },
+      "required": ["senderId", "senderName", "recipientId", "recipientName", "body", "createdAt", "read"]
+    },
+    "Announcement": {
+      "title": "System Announcement",
+      "description": "Global system announcements displayed on homepage",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "Title of the announcement" },
+        "content": { "type": "string", "description": "Content body in markdown or plain text" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Publication timestamp" },
+        "active": { "type": "boolean", "description": "Whether the announcement is currently visible" }
+      },
+      "required": ["title", "content", "createdAt", "active"]
     }
   },
   "firestore": {
@@ -165,6 +247,10 @@
     "posts/{postId}": {
       "schema": "Post",
       "description": "Articles and drafts"
+    },
+    "series/{seriesId}": {
+      "schema": "Series",
+      "description": "Novel series/columns"
     },
     "follows/{followId}": {
       "schema": "Follow",
@@ -181,6 +267,22 @@
     "author_applications/{appId}": {
       "schema": "AuthorApplication",
       "description": "Applications to become an author"
+    },
+    "writing_subscriptions/{subId}": {
+      "schema": "WritingSubscription",
+      "description": "Subscriptions to author writing schedules and punch-ins"
+    },
+    "comments/{commentId}": {
+      "schema": "Comment",
+      "description": "Reader comments and replies on posts"
+    },
+    "messages/{messageId}": {
+      "schema": "Message",
+      "description": "Private direct letters between users"
+    },
+    "announcements/{announcementId}": {
+      "schema": "Announcement",
+      "description": "Global system announcements displayed on homepage"
     }
   }
 }

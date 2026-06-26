@@ -16,7 +16,7 @@ import Bookshelf from './components/Bookshelf';
 import Messages from './components/Messages';
 import AuthorProfile from './components/AuthorProfile';
 import { motion, AnimatePresence } from 'motion/react';
-import { BookOpen, User, Shield, Compass, LogOut, Settings as SettingsIcon, Loader2, Bell, BellRing, Heart, UserPlus, Check, Trash2, Bookmark, MessageSquare, ShieldAlert, Menu, X } from 'lucide-react';
+import { BookOpen, User, Shield, Compass, LogOut, Settings as SettingsIcon, Loader2, Bell, BellRing, Heart, UserPlus, Check, Trash2, Bookmark, MessageSquare, ShieldAlert, Menu, X, PenTool } from 'lucide-react';
 import { safeLocalStorage, safeSessionStorage } from './utils/safeStorage';
 
 export default function App() {
@@ -617,6 +617,7 @@ export default function App() {
               setActiveMessageUserId(authorId);
               setRoute('messages');
             }}
+            onSelectPost={handleSelectPost}
             onSelectAuthor={handleSelectAuthor}
           />
         );
@@ -635,7 +636,17 @@ export default function App() {
           />
         );
       case 'admin':
-        return <Admin user={user} onNavigate={setRoute} onSelectPost={handleSelectPost} />;
+        return (
+          <Admin
+            user={user}
+            onNavigate={setRoute}
+            onSelectPost={handleSelectPost}
+            onStartChat={(applicantId) => {
+              setActiveMessageUserId(applicantId);
+              setRoute('messages');
+            }}
+          />
+        );
       case 'profile':
         return <Profile user={user} onNavigate={setRoute} onSelectPost={handleSelectPost} onEditPost={handleEditPost} onSelectAuthor={handleSelectAuthor} />;
       case 'settings':
@@ -991,12 +1002,22 @@ export default function App() {
                   )}
 
                   <button
-                    onClick={() => { setRoute('profile'); }}
+                    onClick={() => { setRoute('profile'); setIsMobileMenuOpen(false); }}
                     className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${route === 'profile' ? 'bg-indigo-50 text-indigo-600' : 'text-gray-600 hover:bg-gray-50'}`}
                   >
                     <User className="h-4.5 w-4.5" />
                     <span>个人中心</span>
                   </button>
+
+                  {user && user.role === 'reader' && (
+                    <button
+                      onClick={() => { setRoute('profile'); setIsMobileMenuOpen(false); }}
+                      className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100/80 transition-all cursor-pointer"
+                    >
+                      <PenTool className="h-4.5 w-4.5 text-amber-600 animate-pulse" />
+                      <span>申请成为作者 🖋️</span>
+                    </button>
+                  )}
 
                   <div className="h-px bg-gray-100 my-3"></div>
 

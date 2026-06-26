@@ -3,7 +3,8 @@ import { doc, getDoc, updateDoc, deleteDoc, setDoc, addDoc, collection, onSnapsh
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { Post, AppUser, Bookmark, Comment, CommentReply } from '../types';
 import MarkdownRenderer from './MarkdownRenderer';
-import { ArrowLeft, Heart, Calendar, User, Trash2, Edit, Loader2, Sparkles, AlertTriangle, CheckCircle, X, Copy, UserPlus, UserCheck, MessageSquare, Bookmark as BookmarkIcon, Check, AlertCircle, ChevronDown } from 'lucide-react';
+import SeriesDirectory from './SeriesDirectory';
+import { ArrowLeft, Heart, Calendar, User, Trash2, Edit, Loader2, Sparkles, AlertTriangle, CheckCircle, X, Copy, UserPlus, UserCheck, MessageSquare, Bookmark as BookmarkIcon, Check, AlertCircle, ChevronDown, Download, Star } from 'lucide-react';
 import ImageWrapper from './ImageWrapper';
 
 interface PostDetailProps {
@@ -32,6 +33,17 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
 
   const [scrollProgress, setScrollProgress] = useState(0);
 
+  const handleDownloadMarkdown = () => {
+    if (!post) return;
+    const element = document.createElement("a");
+    const file = new Blob([post.content], { type: 'text/markdown;charset=utf-8' });
+    element.href = URL.createObjectURL(file);
+    element.download = `${post.title || 'post'}.md`;
+    document.body.appendChild(element);
+    element.click();
+    document.body.removeChild(element);
+  };
+
   // Expanded state for R18 content
   const [isR18Expanded, setIsR18Expanded] = useState(false);
 
@@ -54,6 +66,63 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
 
   // Recommendations
   const [relatedPosts, setRelatedPosts] = useState<Post[]>([]);
+
+  // Series/连载 states
+  const [seriesChapters, setSeriesChapters] = useState<Post[]>([]);
+  const [userProgressMap, setUserProgressMap] = useState<Record<string, number>>({});
+
+  // Fetch series chapters when post.seriesId is present
+  useEffect(() => {
+    if (!post || !post.seriesId) {
+      setSeriesChapters([]);
+      return;
+    }
+
+    const fetchChapters = async () => {
+      try {
+        const q = query(
+          collection(db, 'posts'),
+          where('seriesId', '==', post.seriesId),
+          where('status', '==', 'published')
+        );
+        const snap = await getDocs(q);
+        const docsList = snap.docs.map(d => ({ id: d.id, ...d.data() }) as Post);
+        docsList.sort((a, b) => (a.seriesOrder || 0) - (b.seriesOrder || 0));
+        setSeriesChapters(docsList);
+      } catch (err) {
+        console.error("Failed to fetch series chapters:", err);
+      }
+    };
+
+    fetchChapters();
+  }, [post?.seriesId]);
+
+  // Fetch reading history for each of these chapters to map reading progress
+  useEffect(() => {
+    if (!user || !post || !post.seriesId) {
+      setUserProgressMap({});
+      return;
+    }
+
+    const fetchProgress = async () => {
+      try {
+        const q = query(collection(db, 'history'), where('userId', '==', user.firebaseUid));
+        const snap = await getDocs(q);
+        const progMap: Record<string, number> = {};
+        snap.docs.forEach(docSnap => {
+          const data = docSnap.data();
+          if (data.postId) {
+            progMap[data.postId] = data.progress || 0;
+          }
+        });
+        setUserProgressMap(progMap);
+      } catch (err) {
+        console.warn("Failed to fetch user reading progress for series:", err);
+      }
+    };
+
+    fetchProgress();
+  }, [user, post?.seriesId]);
 
   // Monitor scroll progress
   useEffect(() => {
@@ -165,7 +234,7 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
 
   // Listen to comments
   useEffect(() => {
-    if (!postId) return;
+    if (!postId || !user) return;
 
     const commentsRef = collection(db, 'comments');
     const q = query(commentsRef, where('postId', '==', postId));
@@ -183,7 +252,7 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
     });
 
     return () => unsub();
-  }, [postId]);
+  }, [postId, user]);
 
   // Load related posts recommendations
   useEffect(() => {
@@ -632,6 +701,10 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
   const isAuthor = user ? post.authorId === user.firebaseUid : false;
   const isAdminOrOwner = user ? user.role === 'owner' : false;
 
+  const currentChapterIndex = post ? seriesChapters.findIndex(ch => ch.id === post.id) : -1;
+  const prevChapter = currentChapterIndex > 0 ? seriesChapters[currentChapterIndex - 1] : null;
+  const nextChapter = currentChapterIndex >= 0 && currentChapterIndex < seriesChapters.length - 1 ? seriesChapters[currentChapterIndex + 1] : null;
+
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
       {/* Visual Reading Progress Bar */}
@@ -655,13 +728,23 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
         {user && (isAuthor || isAdminOrOwner) && (
           <div className="flex items-center gap-2">
             {isAuthor && (
-              <button
-                onClick={() => onEditPost(post.id)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-600 hover:bg-indigo-100 transition-all text-xs font-semibold"
-              >
-                <Edit className="h-3.5 w-3.5" />
-                修改编辑文章
-              </button>
+              <>
+                <button
+                  onClick={handleDownloadMarkdown}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-100 text-emerald-600 hover:bg-emerald-100 transition-all text-xs font-semibold cursor-pointer"
+                  title="导出文章为 Markdown 源文件"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  导出 Markdown
+                </button>
+                <button
+                  onClick={() => onEditPost(post.id)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-600 hover:bg-indigo-100 transition-all text-xs font-semibold"
+                >
+                  <Edit className="h-3.5 w-3.5" />
+                  修改编辑文章
+                </button>
+              </>
             )}
 
             {(isAuthor || isAdminOrOwner) && (
@@ -871,6 +954,73 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
           </button>
           <p className="text-[10px] text-gray-400 mt-2.5 font-medium">每位签约读者对单篇文章只能点赞或取消一次</p>
         </div>
+
+        {/* Series Navigation and Directory Segment */}
+        {post && post.seriesId && seriesChapters.length > 0 && (
+          <div className="mt-8 pt-8 border-t border-gray-100 space-y-6">
+            {/* Previous / Next Chapter Navigation */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Previous Chapter */}
+              {prevChapter ? (
+                <button
+                  onClick={() => onSelectPost?.(prevChapter.id)}
+                  className="flex flex-col items-start p-4 bg-white border border-gray-150/80 rounded-xl text-left hover:border-indigo-300 hover:bg-indigo-50/10 transition-all cursor-pointer group shadow-3xs"
+                >
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider group-hover:text-indigo-500 transition-colors flex items-center gap-1">
+                    ← 上一篇 (第 {prevChapter.seriesOrder || currentChapterIndex} 篇)
+                  </span>
+                  <span className="text-xs font-bold text-gray-800 mt-1 line-clamp-1 group-hover:text-indigo-950">
+                    {prevChapter.title}
+                  </span>
+                </button>
+              ) : (
+                <div className="flex flex-col items-start p-4 bg-gray-50/50 border border-dashed border-gray-200 rounded-xl text-left select-none opacity-60">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                    ← 上一篇
+                  </span>
+                  <span className="text-xs font-medium text-gray-450 mt-1">
+                    已经是本系列第一篇
+                  </span>
+                </div>
+              )}
+
+              {/* Next Chapter */}
+              {nextChapter ? (
+                <button
+                  onClick={() => onSelectPost?.(nextChapter.id)}
+                  className="flex flex-col items-end p-4 bg-white border border-gray-150/80 rounded-xl text-right hover:border-indigo-300 hover:bg-indigo-50/10 transition-all cursor-pointer group shadow-3xs"
+                >
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider group-hover:text-indigo-500 transition-colors flex items-center gap-1">
+                    下一篇 (第 {nextChapter.seriesOrder || (currentChapterIndex + 2)} 篇) →
+                  </span>
+                  <span className="text-xs font-bold text-gray-800 mt-1 line-clamp-1 group-hover:text-indigo-950">
+                    {nextChapter.title}
+                  </span>
+                </button>
+              ) : (
+                <div className="flex flex-col items-end p-4 bg-gray-50/50 border border-dashed border-gray-200 rounded-xl text-right select-none opacity-60">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                    下一篇 →
+                  </span>
+                  <span className="text-xs font-medium text-gray-450 mt-1">
+                    已经是本系列最后一篇
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Series Directory Table of Contents */}
+            <SeriesDirectory
+              seriesId={post.seriesId}
+              seriesTitle={post.seriesTitle || '未知系列'}
+              currentPostId={post.id}
+              user={user}
+              onSelectPost={(id) => onSelectPost?.(id)}
+              chapters={seriesChapters}
+              userProgressMap={userProgressMap}
+            />
+          </div>
+        )}
 
         {/* Bookshelf status category block */}
         {user && (

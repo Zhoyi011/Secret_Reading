@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { Post, AppUser } from '../types';
-import { Search, PenTool, LayoutGrid, List, Heart, Calendar, User as UserIcon, BookOpen, AlertCircle, Eye, Bookmark, Tag, SlidersHorizontal, Check, X } from 'lucide-react';
+import { Post, AppUser, Announcement } from '../types';
+import { Search, PenTool, LayoutGrid, List, Heart, Calendar, User as UserIcon, BookOpen, AlertCircle, Eye, Bookmark, Tag, SlidersHorizontal, Check, X, Megaphone, Sparkles, Star } from 'lucide-react';
 import { searchMatches } from '../utils/chineseConverter';
 import ImageWrapper from './ImageWrapper';
 import { motion } from 'motion/react';
@@ -40,6 +40,10 @@ export default function Home({ user, onNavigate, onSelectPost, onSelectAuthor }:
   const [activeTagTab, setActiveTagTab] = useState<string>('全部');
   const [followingIds, setFollowingIds] = useState<string[]>([]);
   const [sortBy, setSortBy] = useState<SortOption>('latest');
+  
+  // Announcements and local closed ones
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [closedAnnouncementIds, setClosedAnnouncementIds] = useState<string[]>([]);
 
   useEffect(() => {
     setLoading(true);
@@ -116,6 +120,44 @@ export default function Home({ user, onNavigate, onSelectPost, onSelectAuthor }:
     });
     return () => unsubscribe();
   }, [user]);
+
+  // Listen to system announcements
+  useEffect(() => {
+    try {
+      const closed = localStorage.getItem('closed_announcements');
+      if (closed) {
+        setClosedAnnouncementIds(JSON.parse(closed));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+
+    const q = query(
+      collection(db, 'announcements'),
+      where('active', '==', true)
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const loaded = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Announcement[];
+      loaded.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      setAnnouncements(loaded);
+    }, (error) => {
+      console.error("Failed to load announcements in Home:", error);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleCloseAnnouncement = (id: string) => {
+    const updated = [...closedAnnouncementIds, id];
+    setClosedAnnouncementIds(updated);
+    try {
+      localStorage.setItem('closed_announcements', JSON.stringify(updated));
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -198,6 +240,35 @@ export default function Home({ user, onNavigate, onSelectPost, onSelectAuthor }:
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8 text-left animate-fade-in">
+      {/* System Announcements */}
+      {announcements.filter(ann => !closedAnnouncementIds.includes(ann.id)).map((ann) => (
+        <div key={ann.id} className="mb-6 bg-indigo-55/45 bg-indigo-50/50 border border-indigo-100 rounded-2xl p-4 shadow-3xs flex gap-3.5 relative overflow-hidden animate-fade-in group">
+          <div className="absolute top-0 left-0 w-1 h-full bg-indigo-600"></div>
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600 shrink-0">
+            <Megaphone className="h-5 w-5 animate-bounce" style={{ animationDuration: '3s' }} />
+          </div>
+          <div className="flex-grow pr-6 space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="text-[9px] bg-indigo-100 text-indigo-800 font-extrabold px-1.5 py-0.5 rounded-md uppercase tracking-wider font-sans">
+                系统公告
+              </span>
+              <span className="text-[10px] text-gray-400 font-mono">
+                {new Date(ann.createdAt).toLocaleDateString()}
+              </span>
+            </div>
+            <h4 className="text-sm font-bold text-gray-900 font-display">{ann.title}</h4>
+            <p className="text-xs text-gray-600 leading-relaxed font-sans whitespace-pre-wrap">{ann.content}</p>
+          </div>
+          <button
+            onClick={() => handleCloseAnnouncement(ann.id)}
+            className="absolute top-3 right-3 p-1.5 text-gray-400 hover:text-gray-655 hover:bg-gray-100 rounded-lg transition-all cursor-pointer"
+            title="关闭公告"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      ))}
+
       {indexErrorLink && (
         <div className="mb-6 p-4 bg-amber-50 rounded-2xl border border-amber-200 shadow-sm" id="composite-index-tip">
           <div className="flex gap-3">
@@ -240,6 +311,16 @@ export default function Home({ user, onNavigate, onSelectPost, onSelectAuthor }:
           >
             <PenTool className="h-4 w-4 group-hover:rotate-12 transition-transform" />
             开始落笔写文
+          </button>
+        )}
+
+        {user && user.role === 'reader' && (
+          <button
+            onClick={() => onNavigate('profile')}
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-50 border border-amber-200 text-amber-800 hover:bg-amber-100 rounded-xl text-xs font-semibold shadow-sm hover:shadow transition-all group shrink-0 cursor-pointer"
+          >
+            <PenTool className="h-4 w-4 group-hover:rotate-12 transition-transform text-amber-600" />
+            申请成为专栏作者 🖋️
           </button>
         )}
       </div>
@@ -430,7 +511,7 @@ export default function Home({ user, onNavigate, onSelectPost, onSelectAuthor }:
                 {/* Content Section */}
                 <div className="p-5 flex flex-col justify-between flex-grow text-left">
                   <div className="space-y-1.5">
-                    <h3 className="font-display font-bold text-gray-900 group-hover:text-indigo-600 transition-colors line-clamp-1 text-sm sm:text-base leading-snug flex items-center gap-1.5">
+                    <h3 className="font-display font-bold text-gray-900 group-hover:text-indigo-600 transition-colors line-clamp-1 text-sm sm:text-base leading-snug flex items-center gap-1.5 flex-wrap">
                       {post.isR18 && (
                         <span className="shrink-0 bg-rose-100 text-rose-700 text-[9px] font-extrabold px-1.5 py-0.5 rounded-md uppercase tracking-wider font-mono">
                           R18

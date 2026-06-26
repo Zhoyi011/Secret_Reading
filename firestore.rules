@@ -132,5 +132,62 @@ service cloud.firestore {
       allow create: if isSignedIn();
       allow read, update, delete: if isOwner();
     }
+
+    match /series/{seriesId} {
+      allow read: if isSignedIn();
+      allow create: if isAuthorOrOwner() && request.resource.data.authorId == request.auth.uid;
+      allow update: if isSignedIn() && (
+        (resource.data.authorId == request.auth.uid || isOwner()) &&
+        request.resource.data.authorId == resource.data.authorId
+      );
+      allow delete: if isOwner() || (isSignedIn() && resource.data.authorId == request.auth.uid);
+    }
+
+    match /bookmarks/{bookmarkId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /history/{historyId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /writing_subscriptions/{subId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /comments/{commentId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && (
+        request.resource.data.userId == resource.data.userId &&
+        request.resource.data.postId == resource.data.postId
+      );
+      allow delete: if isSignedIn() && (resource.data.userId == request.auth.uid || isOwner());
+    }
+
+    match /messages/{messageId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.senderId == request.auth.uid;
+      allow update: if isSignedIn() && (
+        request.resource.data.read == true || 
+        request.resource.data.senderId == request.auth.uid ||
+        request.resource.data.recipientId == request.auth.uid
+      );
+      allow delete: if isOwner();
+    }
+
+    match /announcements/{announcementId} {
+      allow read: if true;
+      allow write: if isOwner();
+    }
   }
 }

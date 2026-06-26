@@ -11,7 +11,18 @@ export interface AppUser {
   status?: 'active' | 'frozen';
   level?: 'normal' | 'signed' | 'vip'; // Author contracts levels
   updatePlan?: string; // Author update plan / schedule
+  lastPunchIn?: string; // ISO timestamp of last punch-in
+  punchInStreak?: number; // Punch-in streak days
   ageConfirmed?: boolean; // R18 reading age confirmation
+}
+
+export interface WritingSubscription {
+  id: string; // userId_authorId
+  userId: string;
+  username: string;
+  authorId: string;
+  authorName: string;
+  createdAt: string;
 }
 
 export interface Post {
@@ -31,11 +42,16 @@ export interface Post {
   isR18?: boolean;
   tags?: string[]; // Content tagging e.g., '纯爱', '虐心', '架空'
   isPinned?: boolean; // Pin to top
+  isRecommended?: boolean; // Station master recommendation
+  recommendedAt?: string | null; // Recommendation timestamp
   publishAt?: string | null; // Scheduled publishing timestamp
   lastEditedAt?: string | null; // Modified edited indicator
   views?: number; // Read counts
   collects?: number; // Total collections
   shortId?: string; // Random 6-digit collision-free sharing ID
+  seriesId?: string; // Associated Series ID
+  seriesTitle?: string; // Associated Series Title
+  seriesOrder?: number; // Order index within the series
 }
 
 export interface Follow {

@@ -1,26 +1,37 @@
 import React, { useState, useEffect } from 'react';
 import { collection, updateDoc, doc, deleteDoc, onSnapshot, addDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { AppUser, Post, AuthorApplication, Report } from '../types';
-import { Users, BookOpen, ShieldAlert, KeyRound, Trash2, Calendar, Shield, ArrowLeft, Loader2, Edit3, Check, X, FileText, AlertTriangle } from 'lucide-react';
+import { AppUser, Post, AuthorApplication, Report, Announcement } from '../types';
+import { Users, BookOpen, ShieldAlert, KeyRound, Trash2, Calendar, Shield, ArrowLeft, Loader2, Edit3, Check, X, FileText, AlertTriangle, MessageSquare, Megaphone, Star, Volume2 } from 'lucide-react';
 import ImageWrapper from './ImageWrapper';
 
 interface AdminProps {
   user: AppUser | null;
   onNavigate: (route: string) => void;
   onSelectPost: (postId: string) => void;
+  onStartChat?: (userId: string) => void;
 }
 
-export default function Admin({ user, onNavigate, onSelectPost }: AdminProps) {
+export default function Admin({ user, onNavigate, onSelectPost, onStartChat }: AdminProps) {
   const [usersList, setUsersList] = useState<AppUser[]>([]);
   const [postsList, setPostsList] = useState<Post[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
   const [loadingPosts, setLoadingPosts] = useState(true);
   const [loadingApps, setLoadingApps] = useState(true);
   const [loadingReports, setLoadingReports] = useState(true);
-  const [activeTab, setActiveTab] = useState<'users' | 'posts' | 'applications' | 'reports'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'posts' | 'applications' | 'reports' | 'announcements'>('users');
   const [applicationsList, setApplicationsList] = useState<AuthorApplication[]>([]);
   const [reportsList, setReportsList] = useState<Report[]>([]);
+  
+  // Announcements management state
+  const [announcementsList, setAnnouncementsList] = useState<Announcement[]>([]);
+  const [loadingAnnouncements, setLoadingAnnouncements] = useState(true);
+  const [showAnnouncementForm, setShowAnnouncementForm] = useState(false);
+  const [editingAnnouncement, setEditingAnnouncement] = useState<Announcement | null>(null);
+  const [announcementTitle, setAnnouncementTitle] = useState('');
+  const [announcementContent, setAnnouncementContent] = useState('');
+  const [announcementActive, setAnnouncementActive] = useState(true);
+  const [announcementSearch, setAnnouncementSearch] = useState('');
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [dialogLoading, setDialogLoading] = useState(false);
   const [adminDialog, setAdminDialog] = useState<{
@@ -123,6 +134,29 @@ export default function Admin({ user, onNavigate, onSelectPost }: AdminProps) {
     }, (error) => {
       console.error("Failed to load reports:", error);
       setLoadingReports(false);
+    });
+
+    return () => unsubscribe();
+  }, [isOwner, refreshTrigger]);
+
+  // 5. Fetch announcements list
+  useEffect(() => {
+    if (!isOwner) return;
+
+    setLoadingAnnouncements(true);
+    const annRef = collection(db, 'announcements');
+
+    const unsubscribe = onSnapshot(annRef, (snapshot) => {
+      const loaded = snapshot.docs.map((d) => ({
+        id: d.id,
+        ...d.data(),
+      })) as Announcement[];
+      loaded.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      setAnnouncementsList(loaded);
+      setLoadingAnnouncements(false);
+    }, (error) => {
+      console.error("Failed to load announcements inside admin:", error);
+      setLoadingAnnouncements(false);
     });
 
     return () => unsubscribe();
@@ -254,6 +288,107 @@ export default function Admin({ user, onNavigate, onSelectPost }: AdminProps) {
         }
       }
     });
+  };
+
+  // Create or Update announcement
+  const handleSaveAnnouncement = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!announcementTitle.trim() || !announcementContent.trim()) {
+      alert('请填写完整的标题和内容');
+      return;
+    }
+
+    setDialogLoading(true);
+    try {
+      if (editingAnnouncement) {
+        const annRef = doc(db, 'announcements', editingAnnouncement.id);
+        await updateDoc(annRef, {
+          title: announcementTitle.trim(),
+          content: announcementContent.trim(),
+          active: announcementActive,
+        });
+      } else {
+        const annRef = collection(db, 'announcements');
+        await addDoc(annRef, {
+          title: announcementTitle.trim(),
+          content: announcementContent.trim(),
+          active: announcementActive,
+          createdAt: new Date().toISOString()
+        });
+      }
+
+      setAnnouncementTitle('');
+      setAnnouncementContent('');
+      setAnnouncementActive(true);
+      setEditingAnnouncement(null);
+      setShowAnnouncementForm(false);
+
+      setAdminDialog({
+        show: true,
+        type: 'success',
+        title: "保存公告成功",
+        message: "系统公告已成功保存并实时同步生效。"
+      });
+    } catch (err: any) {
+      console.error("Failed to save announcement:", err);
+      setAdminDialog({
+        show: true,
+        type: 'error',
+        title: "保存公告失败",
+        message: err.message || String(err)
+      });
+    } finally {
+      setDialogLoading(false);
+    }
+  };
+
+  const handleEditAnnouncementClick = (ann: Announcement) => {
+    setEditingAnnouncement(ann);
+    setAnnouncementTitle(ann.title);
+    setAnnouncementContent(ann.content);
+    setAnnouncementActive(ann.active);
+    setShowAnnouncementForm(true);
+  };
+
+  const handleDeleteAnnouncement = async (annId: string) => {
+    setAdminDialog({
+      show: true,
+      type: 'confirm_delete',
+      title: "确认删除公告",
+      message: "您确定要删除此公告吗？此操作不可撤销，且将对所有用户实时同步生效。",
+      onConfirm: async () => {
+        setDialogLoading(true);
+        try {
+          const annRef = doc(db, 'announcements', annId);
+          await deleteDoc(annRef);
+          setAdminDialog({
+            show: true,
+            type: 'success',
+            title: "公告删除成功",
+            message: "该公告已从系统中彻底移除。"
+          });
+        } catch (err: any) {
+          console.error("Failed to delete announcement:", err);
+          setAdminDialog({
+            show: true,
+            type: 'error',
+            title: "删除公告失败",
+            message: err.message || String(err)
+          });
+        } finally {
+          setDialogLoading(false);
+        }
+      }
+    });
+  };
+
+  const handleToggleAnnouncementActive = async (ann: Announcement) => {
+    try {
+      const annRef = doc(db, 'announcements', ann.id);
+      await updateDoc(annRef, { active: !ann.active });
+    } catch (err: any) {
+      console.error("Failed to toggle announcement status:", err);
+    }
   };
 
   const handleApproveApplication = async (app: AuthorApplication) => {
@@ -496,39 +631,46 @@ export default function Admin({ user, onNavigate, onSelectPost }: AdminProps) {
         </div>
 
         {/* Tab filters */}
-        <div className="flex bg-gray-100 p-1 rounded-xl shadow-inner max-w-md shrink-0 self-start md:self-auto gap-1">
+        <div className="flex overflow-x-auto scrollbar-none bg-gray-100 p-1 rounded-xl shadow-inner w-full md:max-w-2xl shrink-0 self-start md:self-auto gap-1">
           <button
             onClick={() => setActiveTab('users')}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${activeTab === 'users' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all shrink-0 ${activeTab === 'users' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
           >
             <Users className="h-3.5 w-3.5" />
             用户管理 ({usersList.length})
           </button>
           <button
             onClick={() => setActiveTab('posts')}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${activeTab === 'posts' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all shrink-0 ${activeTab === 'posts' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
           >
             <BookOpen className="h-3.5 w-3.5" />
             文章总览 ({postsList.length})
           </button>
           <button
             onClick={() => setActiveTab('applications')}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${activeTab === 'applications' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all shrink-0 ${activeTab === 'applications' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
           >
             <FileText className="h-3.5 w-3.5" />
             申请审核 ({applicationsList.filter(a => a.status === 'pending').length})
           </button>
           <button
             onClick={() => setActiveTab('reports')}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${activeTab === 'reports' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all shrink-0 ${activeTab === 'reports' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
           >
             <AlertTriangle className="h-3.5 w-3.5" />
             举报管理 ({reportsList.filter(r => r.status === 'pending').length})
           </button>
+          <button
+            onClick={() => setActiveTab('announcements')}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all shrink-0 ${activeTab === 'announcements' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            <Megaphone className="h-3.5 w-3.5" />
+            公告管理 ({announcementsList.length})
+          </button>
         </div>
       </div>
 
-      {loadingUsers || loadingPosts || loadingApps || loadingReports ? (
+      {loadingUsers || loadingPosts || loadingApps || loadingReports || loadingAnnouncements ? (
         <div className="flex flex-col items-center justify-center py-20 bg-white border border-gray-100 rounded-3xl">
           <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
           <span className="text-xs text-gray-500 mt-4 font-semibold">正在同步管理数据...</span>
@@ -567,14 +709,43 @@ export default function Admin({ user, onNavigate, onSelectPost }: AdminProps) {
                     </td>
                     <td className="py-4 px-6 text-gray-600">{target.email}</td>
                     <td className="py-4 px-6">
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wide ${
-                        target.role === 'owner' ? 'bg-indigo-100 text-indigo-800' :
-                        target.role === 'author' ? 'bg-emerald-100 text-emerald-800' :
-                        'bg-gray-100 text-gray-700'
-                      }`}>
-                        {target.role === 'owner' ? '创办者/超级管理员' :
-                         target.role === 'author' ? '签约作家' : '普通读者'}
-                      </span>
+                      <div className="space-y-1">
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wide ${
+                          target.role === 'owner' ? 'bg-indigo-100 text-indigo-800' :
+                          target.role === 'author' ? 'bg-emerald-100 text-emerald-800' :
+                          'bg-gray-100 text-gray-700'
+                        }`}>
+                          {target.role === 'owner' ? '创办者/超级管理员' :
+                           target.role === 'author' ? (
+                             target.level === 'vip' ? '👑 特邀作家' :
+                             target.level === 'signed' ? '✒️ 签约作家' :
+                             '📖 普通作家'
+                           ) : '普通读者'}
+                        </span>
+                        
+                        {target.role === 'author' && (
+                          <div className="flex items-center gap-1 mt-1">
+                            <span className="text-[10px] font-bold text-gray-400">等级:</span>
+                            <select
+                              value={target.level || 'normal'}
+                              onChange={async (e) => {
+                                const nextLevel = e.target.value as 'normal' | 'signed' | 'vip';
+                                try {
+                                  const userRef = doc(db, 'users', target.firebaseUid);
+                                  await updateDoc(userRef, { level: nextLevel });
+                                } catch (err: any) {
+                                  alert("更新作者等级失败：" + err.message);
+                                }
+                              }}
+                              className="text-[10px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-200/50 rounded px-1.5 py-0.5 focus:outline-none"
+                            >
+                              <option value="normal">普通作者</option>
+                              <option value="signed">签约作者</option>
+                              <option value="vip">特邀作者</option>
+                            </select>
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="py-4 px-6 text-gray-400 font-mono text-xs">
                       {new Date(target.createdAt).toLocaleDateString()}
@@ -632,13 +803,40 @@ export default function Admin({ user, onNavigate, onSelectPost }: AdminProps) {
                       <p className="text-[10px] text-gray-400 font-mono">{new Date(target.createdAt).toLocaleDateString()} 注册</p>
                     </div>
                   </div>
-                  <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${
-                    target.role === 'owner' ? 'bg-indigo-100 text-indigo-800' :
-                    target.role === 'author' ? 'bg-emerald-100 text-emerald-800' :
-                    'bg-gray-100 text-gray-700'
-                  }`}>
-                    {target.role === 'owner' ? '管理员' : target.role === 'author' ? '作者' : '读者'}
-                  </span>
+                  <div className="flex flex-col items-end gap-1">
+                    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${
+                      target.role === 'owner' ? 'bg-indigo-100 text-indigo-800' :
+                      target.role === 'author' ? 'bg-emerald-100 text-emerald-800' :
+                      'bg-gray-100 text-gray-700'
+                    }`}>
+                      {target.role === 'owner' ? '管理员' : 
+                       target.role === 'author' ? (
+                         target.level === 'vip' ? '👑 特邀作者' :
+                         target.level === 'signed' ? '✒️ 签约作者' :
+                         '📖 普通作者'
+                       ) : '读者'}
+                    </span>
+
+                    {target.role === 'author' && (
+                      <select
+                        value={target.level || 'normal'}
+                        onChange={async (e) => {
+                          const nextLevel = e.target.value as 'normal' | 'signed' | 'vip';
+                          try {
+                            const userRef = doc(db, 'users', target.firebaseUid);
+                            await updateDoc(userRef, { level: nextLevel });
+                          } catch (err: any) {
+                            alert("更新作者等级失败：" + err.message);
+                          }
+                        }}
+                        className="text-[9px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-200/40 rounded px-1 py-0.5 focus:outline-none mt-1"
+                      >
+                        <option value="normal">普通作者</option>
+                        <option value="signed">签约作者</option>
+                        <option value="vip">特邀作者</option>
+                      </select>
+                    )}
+                  </div>
                 </div>
                 
                 <div className="text-xs text-gray-600 border-t border-gray-100 pt-2.5 flex items-center justify-between gap-2">
@@ -741,10 +939,23 @@ export default function Admin({ user, onNavigate, onSelectPost }: AdminProps) {
                     <td className="py-4 px-6 text-gray-400 font-mono text-xs">
                       {new Date(post.createdAt).toLocaleDateString()}
                     </td>
-                    <td className="py-4 px-6 text-right">
+                    <td className="py-4 px-6 text-right space-x-2">
+                      {post.status === 'published' && (
+                        <button
+                          onClick={() => handleToggleRecommend(post)}
+                          className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border transition-all font-semibold text-xs shadow-sm cursor-pointer ${
+                            post.isRecommended && post.recommendedAt && (new Date().getTime() - new Date(post.recommendedAt).getTime() < 48 * 60 * 60 * 1000)
+                              ? 'bg-amber-100 border-amber-200 text-amber-800 hover:bg-amber-200'
+                              : 'bg-white border-amber-200 text-amber-700 hover:bg-amber-50'
+                          }`}
+                        >
+                          <Star className={`h-3.5 w-3.5 ${post.isRecommended ? 'fill-amber-500 text-amber-600' : ''}`} />
+                          {post.isRecommended && post.recommendedAt && (new Date().getTime() - new Date(post.recommendedAt).getTime() < 48 * 60 * 60 * 1000) ? '取消推荐' : '站长推荐'}
+                        </button>
+                      )}
                       <button
                         onClick={() => handlePostDelete(post)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-rose-50 border border-rose-100 text-rose-600 hover:bg-rose-100 transition-all font-semibold text-xs shadow-sm"
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-rose-50 border border-rose-100 text-rose-600 hover:bg-rose-100 transition-all font-semibold text-xs shadow-sm cursor-pointer"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                         下架删除
@@ -803,13 +1014,28 @@ export default function Admin({ user, onNavigate, onSelectPost }: AdminProps) {
                     <span>❤️ {post.likes || 0} 赞</span>
                   </div>
                   
-                  <button
-                    onClick={() => handlePostDelete(post)}
-                    className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-rose-50 border border-rose-100 text-rose-600 hover:bg-rose-100 transition-all font-semibold text-[11px] shadow-sm"
-                  >
-                    <Trash2 className="h-3 w-3" />
-                    删除
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {post.status === 'published' && (
+                      <button
+                        onClick={() => handleToggleRecommend(post)}
+                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg border transition-all font-semibold text-[11px] shadow-sm cursor-pointer ${
+                          post.isRecommended && post.recommendedAt && (new Date().getTime() - new Date(post.recommendedAt).getTime() < 48 * 60 * 60 * 1000)
+                            ? 'bg-amber-100 border-amber-200 text-amber-800'
+                            : 'bg-white border-amber-200 text-amber-700'
+                        }`}
+                      >
+                        <Star className={`h-3 w-3 ${post.isRecommended ? 'fill-amber-500 text-amber-600' : ''}`} />
+                        推荐
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handlePostDelete(post)}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-rose-50 border border-rose-100 text-rose-600 hover:bg-rose-100 transition-all font-semibold text-[11px] shadow-sm cursor-pointer"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                      删除
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -874,20 +1100,30 @@ export default function Admin({ user, onNavigate, onSelectPost }: AdminProps) {
                       </td>
                       <td className="py-4 px-6 text-right">
                         {app.status === 'pending' ? (
-                          <div className="flex justify-end gap-2">
+                          <div className="flex justify-end gap-2 flex-wrap md:flex-nowrap">
+                            {onStartChat && (
+                              <button
+                                onClick={() => onStartChat(app.userId)}
+                                className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-600 hover:bg-indigo-100 transition-all font-semibold text-xs shadow-3xs cursor-pointer"
+                                title="发起私信与申请人发起面试沟通"
+                              >
+                                <MessageSquare className="h-3.5 w-3.5" />
+                                私信面试
+                              </button>
+                            )}
                             <button
                               onClick={() => handleApproveApplication(app)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-50 border border-emerald-100 text-emerald-600 hover:bg-emerald-100 transition-all font-semibold text-xs shadow-3xs cursor-pointer"
+                              className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg bg-emerald-50 border border-emerald-100 text-emerald-600 hover:bg-emerald-100 transition-all font-semibold text-xs shadow-3xs cursor-pointer"
                             >
                               <Check className="h-3.5 w-3.5" />
-                              批准
+                              直接批准
                             </button>
                             <button
                               onClick={() => handleRejectApplication(app)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-rose-50 border border-rose-100 text-rose-600 hover:bg-rose-100 transition-all font-semibold text-xs shadow-3xs cursor-pointer"
+                              className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg bg-rose-50 border border-rose-100 text-rose-600 hover:bg-rose-100 transition-all font-semibold text-xs shadow-3xs cursor-pointer"
                             >
                               <X className="h-3.5 w-3.5" />
-                              拒绝
+                              直接拒绝
                             </button>
                           </div>
                         ) : app.status === 'rejected' && (app as any).rejectReason ? (
@@ -941,26 +1177,229 @@ export default function Admin({ user, onNavigate, onSelectPost }: AdminProps) {
                   </div>
 
                   {app.status === 'pending' && (
-                    <div className="pt-2.5 border-t border-gray-50 flex gap-2">
-                      <button
-                        onClick={() => handleApproveApplication(app)}
-                        className="flex-1 inline-flex justify-center items-center gap-1 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-sm cursor-pointer"
-                      >
-                        <Check className="h-3 w-3" />
-                        批准
-                      </button>
-                      <button
-                        onClick={() => handleRejectApplication(app)}
-                        className="flex-1 inline-flex justify-center items-center gap-1 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs shadow-sm cursor-pointer"
-                      >
-                        <X className="h-3 w-3" />
-                        拒绝
-                      </button>
+                    <div className="pt-2.5 border-t border-gray-50 flex flex-col gap-2">
+                      {onStartChat && (
+                        <button
+                          onClick={() => onStartChat(app.userId)}
+                          className="w-full inline-flex justify-center items-center gap-1 py-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-semibold text-xs shadow-sm cursor-pointer"
+                        >
+                          <MessageSquare className="h-3 w-3" />
+                          私信面试
+                        </button>
+                      )}
+                      <div className="flex gap-2 w-full">
+                        <button
+                          onClick={() => handleApproveApplication(app)}
+                          className="flex-1 inline-flex justify-center items-center gap-1 py-2 rounded-lg bg-emerald-650 hover:bg-emerald-700 text-white font-semibold text-xs shadow-sm cursor-pointer"
+                        >
+                          <Check className="h-3 w-3" />
+                          批准
+                        </button>
+                        <button
+                          onClick={() => handleRejectApplication(app)}
+                          className="flex-1 inline-flex justify-center items-center gap-1 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs shadow-sm cursor-pointer"
+                        >
+                          <X className="h-3 w-3" />
+                          拒绝
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
               ))
             )}
+          </div>
+        </div>
+      ) : activeTab === 'announcements' ? (
+        /* Announcements Admin Panel */
+        <div className="space-y-6 text-left font-sans animate-fade-in">
+          <div className="bg-white border border-gray-100 rounded-2xl p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <h3 className="font-display font-semibold text-lg text-gray-900 flex items-center gap-2">
+                <Megaphone className="h-5 w-5 text-indigo-600 animate-pulse" />
+                系统公告发布与管理
+              </h3>
+              <p className="text-xs text-gray-400 mt-1">
+                发布全局置顶的系统公告，支持实时修改、下线、或彻底删除。
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setEditingAnnouncement(null);
+                setAnnouncementTitle('');
+                setAnnouncementContent('');
+                setAnnouncementActive(true);
+                setShowAnnouncementForm(true);
+              }}
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold shadow-sm transition-all cursor-pointer self-start md:self-auto"
+            >
+              <Megaphone className="h-3.5 w-3.5" />
+              发布新公告
+            </button>
+          </div>
+
+          {/* Announcement Editing Form Modal */}
+          {showAnnouncementForm && (
+            <div className="bg-white border border-indigo-100 rounded-2xl p-6 shadow-md space-y-4 animate-fade-in">
+              <h4 className="font-display font-bold text-sm text-gray-900">
+                {editingAnnouncement ? '📝 编辑公告' : '📣 新建公告'}
+              </h4>
+              <form onSubmit={handleSaveAnnouncement} className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-gray-500 uppercase">公告标题</label>
+                  <input
+                    type="text"
+                    required
+                    value={announcementTitle}
+                    onChange={(e) => setAnnouncementTitle(e.target.value)}
+                    placeholder="请输入简明醒目的公告标题"
+                    className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs focus:ring-1 focus:ring-indigo-500 focus:bg-white outline-none"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-gray-500 uppercase">公告详细内容</label>
+                  <textarea
+                    required
+                    rows={4}
+                    value={announcementContent}
+                    onChange={(e) => setAnnouncementContent(e.target.value)}
+                    placeholder="请输入公告内容，支持换行..."
+                    className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs focus:ring-1 focus:ring-indigo-500 focus:bg-white outline-none resize-none font-sans"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="announcement-active"
+                    checked={announcementActive}
+                    onChange={(e) => setAnnouncementActive(e.target.checked)}
+                    className="h-4 w-4 rounded text-indigo-600 border-gray-300 focus:ring-indigo-500"
+                  />
+                  <label htmlFor="announcement-active" className="text-xs text-gray-650 cursor-pointer select-none">
+                    立即使此公告在首页对所有读者生效置顶
+                  </label>
+                </div>
+                <div className="flex gap-2 justify-end pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowAnnouncementForm(false)}
+                    className="px-4 py-2 bg-gray-50 hover:bg-gray-100 text-gray-700 border border-gray-200 rounded-lg text-xs font-semibold cursor-pointer"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={dialogLoading}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow-sm cursor-pointer disabled:opacity-50 inline-flex items-center gap-1"
+                  >
+                    {dialogLoading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    确认保存
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* Announcements Lists */}
+          <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-gray-50/75 border-b border-gray-100 text-xs text-gray-500 font-bold uppercase tracking-wider">
+                    <th className="py-4 px-6">公告标题</th>
+                    <th className="py-4 px-6">公告内容摘要</th>
+                    <th className="py-4 px-6">发布时间</th>
+                    <th className="py-4 px-6">显示状态</th>
+                    <th className="py-4 px-6 text-right">管理操作</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 text-sm">
+                  {announcementsList.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="text-center py-12 text-gray-400 italic text-xs">
+                        暂无任何发布过的系统公告记录
+                      </td>
+                    </tr>
+                  ) : (
+                    announcementsList.map((ann) => (
+                      <tr key={ann.id} className="hover:bg-gray-50/50 transition-colors">
+                        <td className="py-4 px-6 font-bold text-gray-900 max-w-xs truncate">{ann.title}</td>
+                        <td className="py-4 px-6 text-gray-550 text-xs max-w-sm truncate whitespace-pre-wrap">{ann.content}</td>
+                        <td className="py-4 px-6 text-gray-400 font-mono text-xs">
+                          {new Date(ann.createdAt).toLocaleString()}
+                        </td>
+                        <td className="py-4 px-6">
+                          <button
+                            onClick={() => handleToggleAnnouncementActive(ann)}
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold cursor-pointer transition-colors ${
+                              ann.active ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200' : 'bg-gray-100 text-gray-550 hover:bg-gray-200'
+                            }`}
+                          >
+                            {ann.active ? '置顶展示中' : '已下线隐藏'}
+                          </button>
+                        </td>
+                        <td className="py-4 px-6 text-right space-x-2">
+                          <button
+                            onClick={() => handleEditAnnouncementClick(ann)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-650 hover:bg-indigo-100 transition-all font-semibold text-xs shadow-3xs cursor-pointer"
+                          >
+                            <Edit3 className="h-3.5 w-3.5" />
+                            编辑
+                          </button>
+                          <button
+                            onClick={() => handleDeleteAnnouncement(ann.id)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-rose-50 border border-rose-100 text-rose-600 hover:bg-rose-100 transition-all font-semibold text-xs shadow-3xs cursor-pointer"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            彻底删除
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Cards View */}
+            <div className="block md:hidden space-y-4 p-4 bg-gray-50/30">
+              {announcementsList.length === 0 ? (
+                <div className="text-center py-12 text-gray-400 italic text-xs bg-white rounded-2xl border border-gray-100">
+                  暂无任何系统公告记录
+                </div>
+              ) : (
+                announcementsList.map((ann) => (
+                  <div key={ann.id} className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm space-y-3">
+                    <div className="flex items-start justify-between gap-2 border-b border-gray-50 pb-2">
+                      <h4 className="font-bold text-gray-950 text-xs line-clamp-1">{ann.title}</h4>
+                      <span className={`inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                        ann.active ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-550'
+                      }`}>
+                        {ann.active ? '展示中' : '下线'}
+                      </span>
+                    </div>
+                    <p className="text-gray-500 text-[11px] leading-relaxed line-clamp-3 whitespace-pre-wrap">{ann.content}</p>
+                    <div className="text-[10px] text-gray-400 font-mono pt-1 flex items-center justify-between">
+                      <span>{new Date(ann.createdAt).toLocaleDateString()}</span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => handleEditAnnouncementClick(ann)}
+                          className="px-2 py-1 bg-indigo-50 border border-indigo-100 text-indigo-650 rounded-lg text-[10px] font-bold cursor-pointer"
+                        >
+                          编辑
+                        </button>
+                        <button
+                          onClick={() => handleDeleteAnnouncement(ann.id)}
+                          className="px-2 py-1 bg-rose-50 border border-rose-100 text-rose-600 rounded-lg text-[10px] font-bold cursor-pointer"
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </div>
       ) : (
