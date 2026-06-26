@@ -16,7 +16,7 @@ import Bookshelf from './components/Bookshelf';
 import Messages from './components/Messages';
 import AuthorProfile from './components/AuthorProfile';
 import { motion, AnimatePresence } from 'motion/react';
-import { BookOpen, User, Shield, Compass, LogOut, Settings as SettingsIcon, Loader2, Bell, BellRing, Heart, UserPlus, Check, Trash2, Bookmark, MessageSquare, ShieldAlert } from 'lucide-react';
+import { BookOpen, User, Shield, Compass, LogOut, Settings as SettingsIcon, Loader2, Bell, BellRing, Heart, UserPlus, Check, Trash2, Bookmark, MessageSquare, ShieldAlert, Menu, X } from 'lucide-react';
 import { safeLocalStorage, safeSessionStorage } from './utils/safeStorage';
 
 export default function App() {
@@ -391,6 +391,11 @@ export default function App() {
   }, []);
 
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    setIsMobileMenuOpen(false);
+  }, [route]);
 
   const handleLogout = async () => {
     setAuthLoading(true);
@@ -651,7 +656,8 @@ export default function App() {
     <div className="min-h-screen flex flex-col bg-[#fafafa]">
       {/* Dynamic Header / Navigation Bar */}
       {!isAuthPage && user && !needsOnboarding && (
-        <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-md border-b border-gray-100/80 shadow-xs" id="app-nav-bar">
+        <>
+          <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-md border-b border-gray-100/80 shadow-xs" id="app-nav-bar">
           <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
             {/* Title / Logo */}
             <div
@@ -675,18 +681,18 @@ export default function App() {
             <nav className="flex items-center gap-1 sm:gap-2">
               <button
                 onClick={() => setRoute('home')}
-                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all ${route === 'home' ? 'bg-indigo-50 text-indigo-600' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'}`}
+                className={`hidden md:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all ${route === 'home' ? 'bg-indigo-50 text-indigo-600' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'}`}
               >
                 <Compass className="h-4 w-4" />
-                <span className="hidden md:inline">专栏推荐</span>
+                <span>专栏推荐</span>
               </button>
 
               <button
                 onClick={() => setRoute('bookshelf')}
-                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all ${route === 'bookshelf' ? 'bg-indigo-50 text-indigo-600' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'}`}
+                className={`hidden md:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all ${route === 'bookshelf' ? 'bg-indigo-50 text-indigo-600' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'}`}
               >
                 <Bookmark className="h-4 w-4" />
-                <span className="hidden md:inline">我的书架</span>
+                <span>我的书架</span>
               </button>
 
               <button
@@ -694,28 +700,28 @@ export default function App() {
                   setActiveMessageUserId(null); // Clear any preselected recipient on direct click
                   setRoute('messages');
                 }}
-                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all ${route === 'messages' ? 'bg-indigo-50 text-indigo-600' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'}`}
+                className={`hidden md:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all ${route === 'messages' ? 'bg-indigo-50 text-indigo-600' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'}`}
               >
                 <MessageSquare className="h-4 w-4" />
-                <span className="hidden md:inline">私人来信</span>
+                <span>私人来信</span>
               </button>
 
               {user.role === 'owner' && (
                 <button
                   onClick={() => setRoute('admin')}
-                  className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all ${route === 'admin' ? 'bg-indigo-50 text-indigo-600' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'}`}
+                  className={`hidden md:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all ${route === 'admin' ? 'bg-indigo-50 text-indigo-600' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'}`}
                 >
                   <Shield className="h-4 w-4" />
-                  <span className="hidden md:inline">管理后台</span>
+                  <span>管理后台</span>
                 </button>
               )}
 
               <button
                 onClick={() => setRoute('profile')}
-                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all ${route === 'profile' ? 'bg-indigo-50 text-indigo-600' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'}`}
+                className={`hidden md:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all ${route === 'profile' ? 'bg-indigo-50 text-indigo-600' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'}`}
               >
                 <User className="h-4 w-4" />
-                <span className="hidden md:inline">个人中心</span>
+                <span>个人中心</span>
               </button>
 
               {/* Notification Bell with Badge */}
@@ -878,24 +884,158 @@ export default function App() {
               <button
                 onClick={() => setRoute('settings')}
                 title="个人资料设置"
-                className={`p-2 rounded-xl transition-all ${route === 'settings' ? 'bg-indigo-50 text-indigo-600' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'}`}
+                className={`hidden md:inline-flex p-2 rounded-xl transition-all ${route === 'settings' ? 'bg-indigo-50 text-indigo-600' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'}`}
               >
                 <SettingsIcon className="h-4.5 w-4.5" />
               </button>
 
-              <div className="h-4 w-px bg-gray-200 mx-1 sm:mx-2"></div>
+              <div className="hidden md:block h-4 w-px bg-gray-200 mx-1 sm:mx-2"></div>
 
               <button
                 onClick={() => setShowLogoutDialog(true)}
                 title="登出当前账户"
-                className="p-2 rounded-xl text-gray-400 hover:text-rose-600 hover:bg-rose-50 transition-all flex cursor-pointer"
+                className="hidden md:inline-flex p-2 rounded-xl text-gray-400 hover:text-rose-600 hover:bg-rose-50 transition-all cursor-pointer"
                 id="logout-button-nav"
               >
                 <LogOut className="h-4.5 w-4.5" />
               </button>
+
+              {/* Hamburger Menu Trigger for Mobile */}
+              <button
+                onClick={() => setIsMobileMenuOpen(true)}
+                title="打开菜单"
+                className="inline-flex md:hidden p-2 rounded-xl text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-all cursor-pointer"
+              >
+                <Menu className="h-4.5 w-4.5" />
+              </button>
             </nav>
           </div>
         </header>
+
+        {/* Mobile Slide-Out Navigation Drawer */}
+        <AnimatePresence>
+          {isMobileMenuOpen && (
+            <>
+              {/* Backdrop */}
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setIsMobileMenuOpen(false)}
+                className="fixed inset-0 z-40 bg-black/50 backdrop-blur-xs md:hidden"
+              />
+
+              {/* Drawer panel */}
+              <motion.div
+                initial={{ x: '100%' }}
+                animate={{ x: 0 }}
+                exit={{ x: '100%' }}
+                transition={{ type: 'spring', damping: 25, stiffness: 220 }}
+                className="fixed top-0 right-0 bottom-0 z-50 w-72 max-w-[85vw] bg-white shadow-2xl md:hidden border-l border-gray-100 flex flex-col text-left"
+              >
+                {/* Header inside drawer */}
+                <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-zinc-50/50">
+                  <div className="flex items-center gap-2">
+                    <div className="h-8 w-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-sm">
+                      秘
+                    </div>
+                    <span className="font-display font-extrabold text-sm text-gray-900">
+                      功能导航
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all cursor-pointer"
+                  >
+                    <X className="h-4.5 w-4.5" />
+                  </button>
+                </div>
+
+                {/* Content Links inside drawer */}
+                <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                  <button
+                    onClick={() => { setRoute('home'); }}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${route === 'home' ? 'bg-indigo-50 text-indigo-600' : 'text-gray-600 hover:bg-gray-50'}`}
+                  >
+                    <Compass className="h-4.5 w-4.5" />
+                    <span>专栏推荐</span>
+                  </button>
+
+                  <button
+                    onClick={() => { setRoute('bookshelf'); }}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${route === 'bookshelf' ? 'bg-indigo-50 text-indigo-600' : 'text-gray-600 hover:bg-gray-50'}`}
+                  >
+                    <Bookmark className="h-4.5 w-4.5" />
+                    <span>我的书架</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setActiveMessageUserId(null);
+                      setRoute('messages');
+                    }}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${route === 'messages' ? 'bg-indigo-50 text-indigo-600' : 'text-gray-600 hover:bg-gray-50'}`}
+                  >
+                    <MessageSquare className="h-4.5 w-4.5" />
+                    <span>私人来信</span>
+                  </button>
+
+                  {user.role === 'owner' && (
+                    <button
+                      onClick={() => { setRoute('admin'); }}
+                      className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${route === 'admin' ? 'bg-indigo-50 text-indigo-600' : 'text-gray-600 hover:bg-gray-50'}`}
+                    >
+                      <Shield className="h-4.5 w-4.5" />
+                      <span>管理后台</span>
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => { setRoute('profile'); }}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${route === 'profile' ? 'bg-indigo-50 text-indigo-600' : 'text-gray-600 hover:bg-gray-50'}`}
+                  >
+                    <User className="h-4.5 w-4.5" />
+                    <span>个人中心</span>
+                  </button>
+
+                  <div className="h-px bg-gray-100 my-3"></div>
+
+                  <button
+                    onClick={() => { setRoute('settings'); }}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${route === 'settings' ? 'bg-indigo-50 text-indigo-600' : 'text-gray-600 hover:bg-gray-50'}`}
+                  >
+                    <SettingsIcon className="h-4.5 w-4.5" />
+                    <span>个人资料设置</span>
+                  </button>
+
+                  <button
+                    onClick={() => { setShowLogoutDialog(true); setIsMobileMenuOpen(false); }}
+                    className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold text-rose-600 hover:bg-rose-50/50 transition-all cursor-pointer text-left"
+                  >
+                    <LogOut className="h-4.5 w-4.5" />
+                    <span>安全注销账户</span>
+                  </button>
+                </div>
+
+                {/* Profile brief footer inside drawer */}
+                <div className="p-4 border-t border-gray-100 bg-zinc-50/50 flex items-center gap-3">
+                  {user.avatar ? (
+                    <img src={user.avatar} className="h-9 w-9 rounded-full object-cover border border-zinc-250 shadow-3xs" alt="Avatar" referrerPolicy="no-referrer" />
+                  ) : (
+                    <div className="h-9 w-9 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-xs shrink-0">
+                      {user.username?.slice(0, 1) || 'U'}
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-bold text-gray-800 truncate leading-tight">{user.username}</p>
+                    <p className="text-[10px] text-gray-400 font-medium truncate mt-0.5">{user.email || '未绑定邮箱'}</p>
+                  </div>
+                </div>
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
+        </>
       )}
 
       {/* Primary body view wrapper with standard animations */}

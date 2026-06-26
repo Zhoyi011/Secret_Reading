@@ -353,7 +353,7 @@ export default function Messages({ user, onNavigate, recipientId }: MessagesProp
 
       <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden grid grid-cols-1 md:grid-cols-3 h-[580px]">
         {/* Left pane: Threads list */}
-        <div className="border-r border-gray-100 flex flex-col h-full bg-zinc-50/20">
+        <div className={`border-r border-gray-100 flex flex-col h-full bg-zinc-50/20 ${activeThreadUserId ? 'hidden md:flex' : 'flex'}`}>
           <div className="p-4 border-b border-gray-100 bg-white">
             <h3 className="text-xs font-bold text-gray-900 tracking-wider uppercase font-display">会话列表</h3>
           </div>
@@ -415,11 +415,21 @@ export default function Messages({ user, onNavigate, recipientId }: MessagesProp
         </div>
 
         {/* Right pane: Chat dialog */}
-        <div className="md:col-span-2 flex flex-col h-full bg-white relative">
+        <div className={`md:col-span-2 flex flex-col h-full bg-white relative ${activeThreadUserId ? 'flex' : 'hidden md:flex'}`}>
           {activeThreadUser ? (
             <>
               {/* Active Header */}
               <div className="p-4 border-b border-gray-100 flex items-center gap-3 bg-zinc-50/10">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveThreadUserId(null);
+                    setActiveThreadUser(null);
+                  }}
+                  className="p-1.5 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors md:hidden mr-1 cursor-pointer"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                </button>
                 <img
                   src={activeThreadUser.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80'}
                   alt={activeThreadUser.name}
