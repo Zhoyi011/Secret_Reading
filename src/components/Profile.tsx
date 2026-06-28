@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { collection, query, where, getDocs, onSnapshot, setDoc, doc, addDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { AppUser, Post, Follow, AuthorApplication } from '../types';
-import { User, Calendar, BookOpen, Clock, Edit2, Shield, Heart, HeartOff, PenTool, Users, X, Loader2 } from 'lucide-react';
+import { User, Calendar, BookOpen, Clock, Edit2, Shield, Heart, HeartOff, PenTool, Users, X, Loader2, Sparkles } from 'lucide-react';
 import ImageWrapper from './ImageWrapper';
 
 interface ProfileProps {
@@ -217,82 +217,211 @@ export default function Profile({ user, onNavigate, onSelectPost, onEditPost, on
   const totalReceivedLikes = myPosts.reduce((acc, p) => acc + (p.likes || 0), 0);
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8 space-y-8">
+    <div className="max-w-4xl mx-auto px-4 py-8 space-y-8 animate-fade-in text-left">
       {/* User info card */}
-      <div className="bg-white rounded-3xl border border-gray-100 p-6 sm:p-10 shadow-sm flex flex-col md:flex-row items-center gap-6 sm:gap-8 relative overflow-hidden">
-        {/* Subtle decorative background gradients */}
-        <div className="absolute top-0 right-0 h-40 w-40 bg-gradient-to-br from-indigo-100/40 to-transparent rounded-full -mr-16 -mt-16 pointer-events-none"></div>
+      {(() => {
+        const isOwner = user.role === 'owner' || user.email === 'zhoyilee@gmail.com';
+        const isAuthor = user.role === 'author';
+        const authorLevel = user.level || 'normal';
 
-        <img
-          src={user.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80'}
-          alt={user.username}
-          className="h-24 w-24 sm:h-28 sm:w-28 rounded-full object-cover border-4 border-indigo-50 shadow-md shrink-0"
-        />
+        let cardClass = "bg-white rounded-3xl border border-gray-100 p-6 sm:p-10 shadow-sm flex flex-col md:flex-row items-center gap-6 sm:gap-8 relative overflow-hidden w-full text-left";
+        let nameClass = "font-display font-bold text-gray-900 text-2xl sm:text-3xl leading-none";
+        let textClass = "text-gray-500 text-xs sm:text-sm font-medium flex items-center justify-center md:justify-start gap-1";
+        let metaClass = "text-gray-400 text-xs flex items-center justify-center md:justify-start gap-3";
+        let ringClass = "h-24 w-24 sm:h-28 sm:w-28 rounded-full object-cover border-4 border-indigo-50 shadow-md shrink-0 ring-4 ring-indigo-50";
+        let statsClass = "grid grid-cols-3 divide-x divide-gray-100 bg-gray-50/50 rounded-2xl border border-gray-100 p-4 shrink-0 w-full md:w-auto text-center";
+        let statsNumClass = "block font-display text-lg font-bold text-gray-900";
+        let statsLabelClass = "text-[10px] text-gray-500";
+        let levelBadge = null;
+        let sparklesElement = null;
+        let bioBanner = null;
 
-        <div className="space-y-3 text-center md:text-left flex-grow">
-          <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-3">
-            <h2 className="font-display font-bold text-gray-900 text-2xl sm:text-3xl leading-none">
-              {user.username}
-            </h2>
-            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-              user.role === 'owner' ? 'bg-indigo-100 text-indigo-800' :
-              user.role === 'author' ? 'bg-emerald-100 text-emerald-800' :
-              'bg-gray-100 text-gray-700'
-            }`}>
-              <Shield className="h-3 w-3" />
-              {user.role === 'owner' ? '站长 (Owner)' :
-               user.role === 'author' ? '专栏作者 (Author)' : '尊享读者 (Reader)'}
+        if (isOwner) {
+          cardClass = "bg-gradient-to-br from-zinc-950 via-purple-950/90 to-zinc-900 rounded-3xl border-2 border-purple-550/80 p-6 sm:p-10 shadow-[0_20px_50px_rgba(168,85,247,0.25)] flex flex-col md:flex-row items-center gap-6 sm:gap-8 relative overflow-hidden w-full text-white text-left";
+          nameClass = "font-display font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-pink-400 to-indigo-300 text-2xl sm:text-3xl leading-none tracking-tight";
+          textClass = "text-purple-200/80 text-xs sm:text-sm font-medium flex items-center justify-center md:justify-start gap-1";
+          metaClass = "text-purple-300/65 text-xs flex items-center justify-center md:justify-start gap-3";
+          ringClass = "h-24 w-24 sm:h-28 sm:w-28 rounded-full object-cover border-4 border-purple-500/30 shadow-md shrink-0 ring-4 ring-purple-500 ring-offset-2 ring-offset-zinc-950";
+          statsClass = "grid grid-cols-3 divide-x divide-purple-500/10 bg-zinc-900/85 rounded-2xl border border-purple-500/20 p-4 shrink-0 w-full md:w-auto text-center";
+          statsNumClass = "block font-display text-lg font-extrabold text-purple-300";
+          statsLabelClass = "text-[10px] text-purple-200/60";
+          levelBadge = (
+            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-600 text-white shadow-xs">
+              👑 站长 / 平台主理人
             </span>
-          </div>
-
-          <p className="text-gray-500 text-xs sm:text-sm font-medium flex items-center justify-center md:justify-start gap-1">
-            <User className="h-4 w-4 text-gray-400" />
-            <span>邮箱: {user.email}</span>
-          </p>
-
-          <p className="text-gray-400 text-xs flex items-center justify-center md:justify-start gap-3">
-            <span className="flex items-center gap-1">
-              <Clock className="h-3.5 w-3.5" />
-              加入于: {new Date(user.createdAt).toLocaleDateString()}
+          );
+          bioBanner = (
+            <div className="text-[10px] sm:text-[11px] bg-purple-900/40 text-purple-200 font-semibold px-3 py-1.5 rounded-xl border border-purple-500/20 mt-1 max-w-md">
+              🔮 站长：平台创办人兼全网最高管理员。统筹全站，真诚为您提供最好的阅读体验。
+            </div>
+          );
+          sparklesElement = (
+            <>
+              <div className="absolute top-0 right-0 h-44 w-44 bg-gradient-to-br from-purple-550/15 to-transparent rounded-full -mr-16 -mt-16 pointer-events-none"></div>
+              <Sparkles className="absolute h-6 w-6 text-purple-400/30 top-6 right-8 animate-pulse pointer-events-none" />
+            </>
+          );
+        } else if (isAuthor) {
+          if (authorLevel === 'vip') {
+            cardClass = "bg-gradient-to-br from-amber-100/45 via-white to-orange-50/35 rounded-3xl border-2 border-amber-300 p-6 sm:p-10 shadow-[0_15px_35px_rgba(245,158,11,0.12)] flex flex-col md:flex-row items-center gap-6 sm:gap-8 relative overflow-hidden w-full text-left";
+            nameClass = "font-display font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-550 via-amber-700 to-rose-600 text-2xl sm:text-3xl leading-none tracking-tight";
+            textClass = "text-amber-850/90 text-xs sm:text-sm font-medium flex items-center justify-center md:justify-start gap-1";
+            metaClass = "text-amber-600/70 text-xs flex items-center justify-center md:justify-start gap-3";
+            ringClass = "h-24 w-24 sm:h-28 sm:w-28 rounded-full object-cover border-4 border-white shadow-md shrink-0 ring-4 ring-amber-400 ring-offset-2 ring-offset-amber-50 animate-pulse";
+            statsClass = "grid grid-cols-3 divide-x divide-amber-200/40 bg-gradient-to-br from-amber-50/70 to-orange-50/40 rounded-2xl border border-amber-100 p-4 shrink-0 w-full md:w-auto text-center shadow-2xs";
+            statsNumClass = "block font-display text-lg font-black text-amber-800";
+            statsLabelClass = "text-[10px] text-amber-600/80";
+            levelBadge = (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black bg-gradient-to-r from-amber-500 to-rose-500 text-white shadow-md border border-amber-400/30 animate-bounce">
+                👑 特邀作者 (VIP Guest)
+              </span>
+            );
+            bioBanner = (
+              <div className="text-[10px] sm:text-[11px] bg-amber-50/70 text-amber-800 font-semibold px-3 py-1.5 rounded-xl border border-amber-100 mt-1 max-w-md">
+                🏆 特邀专栏：平台重磅特邀常驻名家，享有最高层级置顶与深度专栏特权。
+              </div>
+            );
+            sparklesElement = (
+              <>
+                <div className="absolute top-0 right-0 h-40 w-40 bg-gradient-to-br from-amber-200/30 to-transparent rounded-full -mr-16 -mt-16 pointer-events-none"></div>
+                <Sparkles className="absolute h-5 w-5 text-amber-500/50 top-6 right-8 animate-pulse pointer-events-none" />
+                <Sparkles className="absolute h-4 w-4 text-orange-400/40 bottom-6 right-1/4 animate-pulse pointer-events-none" />
+              </>
+            );
+          } else if (authorLevel === 'signed') {
+            cardClass = "bg-gradient-to-br from-emerald-50/60 via-white to-emerald-50/10 rounded-3xl border-2 border-emerald-250 p-6 sm:p-10 shadow-[0_8px_30px_rgba(16,185,129,0.06)] flex flex-col md:flex-row items-center gap-6 sm:gap-8 relative overflow-hidden w-full text-left";
+            nameClass = "font-display font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-emerald-600 via-teal-700 to-emerald-950 text-2xl sm:text-3xl leading-none";
+            textClass = "text-emerald-800/80 text-xs sm:text-sm font-medium flex items-center justify-center md:justify-start gap-1";
+            metaClass = "text-emerald-600/60 text-xs flex items-center justify-center md:justify-start gap-3";
+            ringClass = "h-24 w-24 sm:h-28 sm:w-28 rounded-full object-cover border-4 border-white shadow-md shrink-0 ring-4 ring-emerald-300";
+            statsClass = "grid grid-cols-3 divide-x divide-emerald-100 bg-emerald-50/40 rounded-2xl border border-emerald-100/60 p-4 shrink-0 w-full md:w-auto text-center";
+            statsNumClass = "block font-display text-lg font-bold text-emerald-800";
+            statsLabelClass = "text-[10px] text-emerald-600";
+            levelBadge = (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-emerald-600 text-white shadow-xs">
+                ✒️ 签约作者 (Signed)
+              </span>
+            );
+            bioBanner = (
+              <div className="text-[10px] sm:text-[11px] bg-emerald-50/70 text-emerald-850 font-semibold px-3 py-1.5 rounded-xl border border-emerald-100 mt-1 max-w-md">
+                ⭐️ 签约作家：平台官方认证深度签约创作者，享有定时发布等创作特权。
+              </div>
+            );
+            sparklesElement = (
+              <div className="absolute top-0 right-0 h-40 w-40 bg-gradient-to-br from-emerald-100/30 to-transparent rounded-full -mr-16 -mt-16 pointer-events-none"></div>
+            );
+          } else {
+            cardClass = "bg-gradient-to-br from-indigo-50/50 via-white to-sky-50/30 rounded-3xl border border-indigo-100/80 p-6 sm:p-10 shadow-[0_4px_20px_rgba(99,102,241,0.02)] flex flex-col md:flex-row items-center gap-6 sm:gap-8 relative overflow-hidden w-full text-left";
+            nameClass = "font-display font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-sky-850 text-2xl sm:text-3xl leading-none";
+            textClass = "text-indigo-800/70 text-xs sm:text-sm font-medium flex items-center justify-center md:justify-start gap-1";
+            metaClass = "text-indigo-400 text-xs flex items-center justify-center md:justify-start gap-3";
+            ringClass = "h-24 w-24 sm:h-28 sm:w-28 rounded-full object-cover border-4 border-white shadow-md shrink-0 ring-4 ring-indigo-150";
+            statsClass = "grid grid-cols-3 divide-x divide-indigo-100 bg-indigo-50/20 rounded-2xl border border-indigo-100/40 p-4 shrink-0 w-full md:w-auto text-center";
+            statsNumClass = "block font-display text-lg font-bold text-indigo-700";
+            statsLabelClass = "text-[10px] text-indigo-500";
+            levelBadge = (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100/60 shadow-2xs">
+                📖 普通作者
+              </span>
+            );
+            bioBanner = (
+              <div className="text-[10px] sm:text-[11px] bg-indigo-50/50 text-indigo-700 font-semibold px-3 py-1.5 rounded-xl border border-indigo-100/50 mt-1 max-w-md">
+                ✒️ 普通作者：已开启专属阅读专栏创作权限，产出精品优质原创短文。
+              </div>
+            );
+            sparklesElement = (
+              <div className="absolute top-0 right-0 h-40 w-40 bg-gradient-to-br from-indigo-100/20 to-transparent rounded-full -mr-16 -mt-16 pointer-events-none"></div>
+            );
+          }
+        } else {
+          levelBadge = (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-gray-100 text-gray-700 border border-gray-200">
+              尊享读者
             </span>
-          </p>
+          );
+          sparklesElement = (
+            <div className="absolute top-0 right-0 h-40 w-40 bg-gradient-to-br from-gray-100 to-transparent rounded-full -mr-16 -mt-16 pointer-events-none opacity-40"></div>
+          );
+        }
 
-          <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 text-xs font-semibold pt-1">
-            <button
-              type="button"
-              onClick={() => setShowFollowingModal(true)}
-              className="flex items-center gap-1 text-gray-600 bg-gray-50 hover:bg-gray-100 border border-gray-100 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
-            >
-              <span className="text-indigo-600 font-bold font-display">{followingCount}</span>
-              <span className="text-gray-400 font-medium">关注中</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowFollowersModal(true)}
-              className="flex items-center gap-1 text-gray-600 bg-gray-50 hover:bg-gray-100 border border-gray-100 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
-            >
-              <span className="text-indigo-600 font-bold font-display">{followersCount}</span>
-              <span className="text-gray-400 font-medium">粉丝</span>
-            </button>
-          </div>
-        </div>
+        return (
+          <div className={cardClass}>
+            {sparklesElement}
 
-        {/* Stats card banner */}
-        <div className="grid grid-cols-3 divide-x divide-gray-100 bg-gray-50/50 rounded-2xl border border-gray-100 p-4 shrink-0 w-full md:w-auto text-center">
-          <div className="px-3">
-            <span className="block font-display text-lg font-bold text-gray-900">{publishedCount}</span>
-            <span className="text-[10px] text-gray-500">已发文章</span>
+            <img
+              src={user.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80'}
+              alt={user.username}
+              className={ringClass}
+            />
+
+            <div className="space-y-3 text-center md:text-left flex-grow">
+              <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-3 justify-center md:justify-start">
+                <h2 className={nameClass}>
+                  {user.username}
+                </h2>
+                {levelBadge}
+              </div>
+
+              <p className={textClass}>
+                <User className="h-4 w-4 shrink-0 opacity-70" />
+                <span>邮箱: {user.email}</span>
+              </p>
+
+              <p className={metaClass}>
+                <span className="flex items-center gap-1">
+                  <Clock className="h-3.5 w-3.5 shrink-0" />
+                  加入于: {new Date(user.createdAt).toLocaleDateString()}
+                </span>
+              </p>
+
+              {bioBanner}
+
+              <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 text-xs font-semibold pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowFollowingModal(true)}
+                  className={`flex items-center gap-1 border px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${
+                    isOwner 
+                      ? 'text-purple-200 bg-purple-900/40 border-purple-800/50 hover:bg-purple-900/65' 
+                      : 'text-gray-600 bg-gray-50 border-gray-100 hover:bg-gray-100'
+                  }`}
+                >
+                  <span className={`${isOwner ? 'text-purple-300' : 'text-indigo-600'} font-bold font-display`}>{followingCount}</span>
+                  <span className={`${isOwner ? 'text-purple-300/60' : 'text-gray-400'} font-medium`}>关注中</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowFollowersModal(true)}
+                  className={`flex items-center gap-1 border px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${
+                    isOwner 
+                      ? 'text-purple-200 bg-purple-900/40 border-purple-800/50 hover:bg-purple-900/65' 
+                      : 'text-gray-600 bg-gray-50 border-gray-100 hover:bg-gray-100'
+                  }`}
+                >
+                  <span className={`${isOwner ? 'text-purple-300' : 'text-indigo-600'} font-bold font-display`}>{followersCount}</span>
+                  <span className={`${isOwner ? 'text-purple-300/60' : 'text-gray-400'} font-medium`}>粉丝</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Stats card banner */}
+            <div className={statsClass}>
+              <div className="px-3">
+                <span className={statsNumClass}>{publishedCount}</span>
+                <span className={statsLabelClass}>已发文章</span>
+              </div>
+              <div className="px-3">
+                <span className={statsNumClass}>{draftCount}</span>
+                <span className={statsLabelClass}>保存草稿</span>
+              </div>
+              <div className="px-3">
+                <span className={statsNumClass}>{totalReceivedLikes}</span>
+                <span className={statsLabelClass}>获赞总计</span>
+              </div>
+            </div>
           </div>
-          <div className="px-3">
-            <span className="block font-display text-lg font-bold text-gray-900">{draftCount}</span>
-            <span className="text-[10px] text-gray-500">保存草稿</span>
-          </div>
-          <div className="px-3">
-            <span className="block font-display text-lg font-bold text-gray-900">{totalReceivedLikes}</span>
-            <span className="text-[10px] text-gray-500">获赞总计</span>
-          </div>
-        </div>
-      </div>
+        );
+      })()}
 
       {user.role === 'reader' && (
         <div className="bg-gradient-to-r from-indigo-50/50 to-purple-50/25 rounded-3xl border border-indigo-100/60 p-6 sm:p-8 space-y-4 text-left shadow-2xs">

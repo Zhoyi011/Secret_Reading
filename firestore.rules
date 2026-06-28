@@ -144,14 +144,14 @@ service cloud.firestore {
     }
 
     match /bookmarks/{bookmarkId} {
-      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow read: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid);
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
       allow update: if isSignedIn() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
       allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
     }
 
     match /history/{historyId} {
-      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow read: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid);
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
       allow update: if isSignedIn() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
       allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
@@ -188,6 +188,39 @@ service cloud.firestore {
     match /announcements/{announcementId} {
       allow read: if true;
       allow write: if isOwner();
+    }
+
+    match /short_reviews/{reviewId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn();
+      allow delete: if isSignedIn() && (resource.data.userId == request.auth.uid || isOwner());
+    }
+
+    match /questions/{questionId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn();
+      allow delete: if isSignedIn() && (resource.data.userId == request.auth.uid || isOwner());
+    }
+
+    match /story_bounties/{bountyId} {
+      allow read: if true;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn();
+      allow delete: if isSignedIn() && (resource.data.userId == request.auth.uid || isOwner());
+    }
+
+    match /cp_polls/{pollId} {
+      allow read: if true;
+      allow create, delete: if isOwner();
+      allow update: if isSignedIn();
+    }
+
+    match /user_streaks/{streakId} {
+      allow read: if true;
+      allow create, update: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow delete: if isOwner();
     }
   }
 }

@@ -15,8 +15,9 @@ import Onboarding from './components/Onboarding';
 import Bookshelf from './components/Bookshelf';
 import Messages from './components/Messages';
 import AuthorProfile from './components/AuthorProfile';
+import CustomerService from './components/CustomerService';
 import { motion, AnimatePresence } from 'motion/react';
-import { BookOpen, User, Shield, Compass, LogOut, Settings as SettingsIcon, Loader2, Bell, BellRing, Heart, UserPlus, Check, Trash2, Bookmark, MessageSquare, ShieldAlert, Menu, X, PenTool } from 'lucide-react';
+import { BookOpen, User, Shield, Compass, LogOut, Settings as SettingsIcon, Loader2, Bell, BellRing, Heart, UserPlus, Check, Trash2, Bookmark, MessageSquare, ShieldAlert, Menu, X, PenTool, Headphones } from 'lucide-react';
 import { safeLocalStorage, safeSessionStorage } from './utils/safeStorage';
 
 export default function App() {
@@ -31,9 +32,16 @@ export default function App() {
   const [activeMessageUserId, setActiveMessageUserId] = useState<string | null>(null);
   const [selectedAuthorId, setSelectedAuthorId] = useState<string | null>(null);
   const [prevRoute, setPrevRoute] = useState<string>('home');
+  const [isFocusMode, setIsFocusMode] = useState(false);
 
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
+
+  useEffect(() => {
+    if (route !== 'post-detail') {
+      setIsFocusMode(false);
+    }
+  }, [route]);
 
   const isCreatingProfileRef = React.useRef(false);
   const bootstrapTimerRef = React.useRef<any>(null);
@@ -158,10 +166,19 @@ export default function App() {
         const userRef = doc(db, 'users', fbUser.uid);
         
         // Listen in real-time to user profile changes
-        activeSnapshotUnsubscribe = onSnapshot(userRef, (snapshot: any) => {
+        activeSnapshotUnsubscribe = onSnapshot(userRef, async (snapshot: any) => {
           if (snapshot.exists()) {
+            const data = snapshot.data();
+            if (data.email === 'zhoyilee@gmail.com' && data.role !== 'owner') {
+              console.log("[Self-Correction] Owner role mismatch detected, restoring owner role in database...");
+              try {
+                await updateDoc(userRef, { role: 'owner' });
+              } catch (e) {
+                console.error("[Self-Correction] Restoring owner role failed:", e);
+              }
+            }
             setUser({
-              ...snapshot.data(),
+              ...data,
             } as AppUser);
             // Default logged-in navigation
             if (route === 'login' || route === 'register') {
@@ -619,6 +636,8 @@ export default function App() {
             }}
             onSelectPost={handleSelectPost}
             onSelectAuthor={handleSelectAuthor}
+            isFocusMode={isFocusMode}
+            onToggleFocusMode={setIsFocusMode}
           />
         );
       case 'author-profile':
@@ -633,6 +652,17 @@ export default function App() {
               setRoute('messages');
             }}
             onBack={() => setRoute(prevRoute || 'home')}
+          />
+        );
+      case 'customer-service':
+        return (
+          <CustomerService
+            user={user}
+            onNavigate={setRoute}
+            onStartChat={(ownerId) => {
+              setActiveMessageUserId(ownerId);
+              setRoute('messages');
+            }}
           />
         );
       case 'admin':
@@ -666,7 +696,7 @@ export default function App() {
   return (
     <div className="min-h-screen flex flex-col bg-[#fafafa]">
       {/* Dynamic Header / Navigation Bar */}
-      {!isAuthPage && user && !needsOnboarding && (
+      {!isAuthPage && user && !needsOnboarding && !isFocusMode && (
         <>
           <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-md border-b border-gray-100/80 shadow-xs" id="app-nav-bar">
           <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
@@ -715,6 +745,14 @@ export default function App() {
               >
                 <MessageSquare className="h-4 w-4" />
                 <span>私人来信</span>
+              </button>
+
+              <button
+                onClick={() => setRoute('customer-service')}
+                className={`hidden md:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all ${route === 'customer-service' ? 'bg-indigo-50 text-indigo-600' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'}`}
+              >
+                <Headphones className="h-4 w-4" />
+                <span>智能客服</span>
               </button>
 
               {user.role === 'owner' && (
@@ -991,6 +1029,14 @@ export default function App() {
                     <span>私人来信</span>
                   </button>
 
+                  <button
+                    onClick={() => { setRoute('customer-service'); setIsMobileMenuOpen(false); }}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${route === 'customer-service' ? 'bg-indigo-50 text-indigo-600' : 'text-gray-600 hover:bg-gray-50'}`}
+                  >
+                    <Headphones className="h-4.5 w-4.5" />
+                    <span>智能客服</span>
+                  </button>
+
                   {user.role === 'owner' && (
                     <button
                       onClick={() => { setRoute('admin'); }}
@@ -1075,7 +1121,7 @@ export default function App() {
       </main>
 
       {/* Simple footer indicator */}
-      {!isAuthPage && (
+      {!isAuthPage && !isFocusMode && (
         <footer className="py-6 text-center text-[10px] text-gray-400 border-t border-gray-100/60 bg-white">
           <div className="max-w-6xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2.5">
             <span className="font-medium">© 2026 私密阅读专栏. 阮梅230 刻晴95.</span>

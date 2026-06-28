@@ -14,6 +14,7 @@ export interface AppUser {
   lastPunchIn?: string; // ISO timestamp of last punch-in
   punchInStreak?: number; // Punch-in streak days
   ageConfirmed?: boolean; // R18 reading age confirmation
+  isMuted?: boolean; // Mute state
 }
 
 export interface WritingSubscription {
@@ -163,3 +164,81 @@ export interface Message {
   content: string;
   createdAt: string;
 }
+
+// Interactive Features Interfaces
+export interface ShortReview {
+  id: string;
+  postId: string;
+  userId: string;
+  username: string;
+  avatar: string;
+  content: string;
+  isFeatured: boolean;
+  createdAt: string;
+}
+
+export interface AuthorQuestion {
+  id: string;
+  postId: string;
+  userId: string;
+  username: string;
+  avatar: string;
+  question: string;
+  answer?: string;
+  answeredAt?: string;
+  createdAt: string;
+}
+
+export interface BountyClaim {
+  id: string;
+  userId: string;
+  username: string;
+  avatar: string;
+  storyTitle: string;
+  storyLink: string;
+  comment: string;
+  isAccepted: boolean;
+  createdAt: string;
+}
+
+export interface StoryBounty {
+  id: string;
+  userId: string;
+  username: string;
+  avatar: string;
+  title: string;
+  description: string;
+  rewardAmount: number;
+  status: 'open' | 'claimed' | 'closed';
+  claims: BountyClaim[];
+  createdAt: string;
+}
+
+export interface CPCandidate {
+  id: string;
+  name: string;
+  description: string;
+  votes: number;
+  voters: string[];
+}
+
+export interface CPVoteTheme {
+  id: string;
+  title: string;
+  description: string;
+  isActive: boolean;
+  candidates: CPCandidate[];
+  createdAt: string;
+}
+
+export interface UserStreak {
+  id: string; // userId
+  userId: string;
+  username: string;
+  streakCount: number;
+  lastCheckedIn: string; // YYYY-MM-DD
+  history: string[]; // List of checked-in dates (YYYY-MM-DD)
+  badges: string[]; // Earned virtual badges e.g., '初级书虫', '狂热书圣', '同人真爱粉'
+  updatedAt: string;
+}
+

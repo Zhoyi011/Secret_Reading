@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { collection, updateDoc, doc, deleteDoc, onSnapshot, addDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { AppUser, Post, AuthorApplication, Report, Announcement } from '../types';
-import { Users, BookOpen, ShieldAlert, KeyRound, Trash2, Calendar, Shield, ArrowLeft, Loader2, Edit3, Check, X, FileText, AlertTriangle, MessageSquare, Megaphone, Star, Volume2 } from 'lucide-react';
+import { Users, BookOpen, ShieldAlert, KeyRound, Trash2, Calendar, Shield, ArrowLeft, Loader2, Edit3, Check, X, FileText, AlertTriangle, MessageSquare, Megaphone, Star, Volume2, VolumeX, Search } from 'lucide-react';
 import ImageWrapper from './ImageWrapper';
 
 interface AdminProps {
@@ -14,14 +14,69 @@ interface AdminProps {
 
 export default function Admin({ user, onNavigate, onSelectPost, onStartChat }: AdminProps) {
   const [usersList, setUsersList] = useState<AppUser[]>([]);
+  const [userSearch, setUserSearch] = useState('');
+  const [userPage, setUserPage] = useState(1);
+  const usersPerPage = 10;
+
+  const [postSearch, setPostSearch] = useState('');
+  const [appSearch, setAppSearch] = useState('');
+  const [reportSearch, setReportSearch] = useState('');
+
   const [postsList, setPostsList] = useState<Post[]>([]);
+
+  const filteredUsersList = usersList.filter((target) => {
+    if (!userSearch.trim()) return true;
+    const query = userSearch.toLowerCase();
+    return (
+      (target.username || '').toLowerCase().includes(query) ||
+      (target.email || '').toLowerCase().includes(query) ||
+      (target.firebaseUid || '').toLowerCase().includes(query)
+    );
+  });
+
+  const totalUserPages = Math.ceil(filteredUsersList.length / usersPerPage) || 1;
+  const paginatedUsersList = filteredUsersList.slice((userPage - 1) * usersPerPage, userPage * usersPerPage);
+
+  const filteredPostsList = postsList.filter((post) => {
+    if (!postSearch.trim()) return true;
+    const query = postSearch.toLowerCase();
+    return (
+      (post.title || '').toLowerCase().includes(query) ||
+      (post.authorName || '').toLowerCase().includes(query) ||
+      (post.id || '').toLowerCase().includes(query)
+    );
+  });
+
   const [loadingUsers, setLoadingUsers] = useState(true);
   const [loadingPosts, setLoadingPosts] = useState(true);
   const [loadingApps, setLoadingApps] = useState(true);
   const [loadingReports, setLoadingReports] = useState(true);
   const [activeTab, setActiveTab] = useState<'users' | 'posts' | 'applications' | 'reports' | 'announcements'>('users');
   const [applicationsList, setApplicationsList] = useState<AuthorApplication[]>([]);
+
+  const filteredApplicationsList = applicationsList.filter((app) => {
+    if (!appSearch.trim()) return true;
+    const query = appSearch.toLowerCase();
+    return (
+      (app.username || '').toLowerCase().includes(query) ||
+      (app.email || '').toLowerCase().includes(query) ||
+      (app.bio || '').toLowerCase().includes(query) ||
+      (app.sampleContent || '').toLowerCase().includes(query)
+    );
+  });
+
   const [reportsList, setReportsList] = useState<Report[]>([]);
+
+  const filteredReportsList = reportsList.filter((report) => {
+    if (!reportSearch.trim()) return true;
+    const query = reportSearch.toLowerCase();
+    return (
+      (report.postTitle || '').toLowerCase().includes(query) ||
+      (report.reason || '').toLowerCase().includes(query) ||
+      (report.details || '').toLowerCase().includes(query) ||
+      (report.reporterName || '').toLowerCase().includes(query)
+    );
+  });
   
   // Announcements management state
   const [announcementsList, setAnnouncementsList] = useState<Announcement[]>([]);
@@ -254,6 +309,50 @@ export default function Admin({ user, onNavigate, onSelectPost, onStartChat }: A
     });
   };
 
+  const handleMuteToggle = async (targetUser: AppUser) => {
+    if (targetUser.email === 'zhoyilee@gmail.com') {
+      setAdminDialog({
+        show: true,
+        type: 'info',
+        title: "无法禁言本站站长",
+        message: "站长主管理员账号拥有安全特权，不支持执行账户禁言。"
+      });
+      return;
+    }
+
+    const nextMute = !targetUser.isMuted;
+
+    setAdminDialog({
+      show: true,
+      type: 'confirm_role',
+      title: nextMute ? "⚠️ 确认实施禁言限制" : "✅ 确认解除禁言状态",
+      message: `您正在请求将用户「${targetUser.username}」的发言状态变变更为 [${nextMute ? '禁言限制' : '正常发言'}]。\n禁言后，该用户将无法发布新作品、发表评论、发表短评或给其他用户发送私人来信，但仍可正常浏览和阅读文章。`,
+      onConfirm: async () => {
+        setDialogLoading(true);
+        try {
+          const userRef = doc(db, 'users', targetUser.firebaseUid);
+          await updateDoc(userRef, { isMuted: nextMute });
+          setAdminDialog({
+            show: true,
+            type: 'success',
+            title: "禁言状态更新成功",
+            message: `用户「${targetUser.username}」已成功配置为 [${nextMute ? '禁言中' : '可发言'}] 状态。`
+          });
+        } catch (err: any) {
+          console.error("Failed to toggle mute status:", err);
+          setAdminDialog({
+            show: true,
+            type: 'error',
+            title: "禁言变更失败",
+            message: "操作过程中报错: " + (err.message || String(err))
+          });
+        } finally {
+          setDialogLoading(false);
+        }
+      }
+    });
+  };
+
   const handlePostDelete = async (post: Post) => {
     setAdminDialog({
       show: true,
@@ -288,6 +387,45 @@ export default function Admin({ user, onNavigate, onSelectPost, onStartChat }: A
         }
       }
     });
+  };
+
+  const handleToggleRecommend = async (post: Post) => {
+    const isCurrentlyRec = post.isRecommended && post.recommendedAt && (new Date().getTime() - new Date(post.recommendedAt).getTime() < 48 * 60 * 60 * 1000);
+    
+    try {
+      const postRef = doc(db, 'posts', post.id);
+      if (isCurrentlyRec) {
+        await updateDoc(postRef, {
+          isRecommended: false,
+          recommendedAt: null
+        });
+        setAdminDialog({
+          show: true,
+          type: 'success',
+          title: "取消推荐成功",
+          message: `已取消博文「${post.title}」的站长强推。`
+        });
+      } else {
+        await updateDoc(postRef, {
+          isRecommended: true,
+          recommendedAt: new Date().toISOString()
+        });
+        setAdminDialog({
+          show: true,
+          type: 'success',
+          title: "站长推荐成功",
+          message: `已将博文「${post.title}」加入站长强推名录，将在首页顶部推荐栏持续展示 48 小时！`
+        });
+      }
+    } catch (err: any) {
+      console.error("Failed to toggle recommend:", err);
+      setAdminDialog({
+        show: true,
+        type: 'error',
+        title: "操作失败",
+        message: err.message || String(err)
+      });
+    }
   };
 
   // Create or Update announcement
@@ -677,12 +815,42 @@ export default function Admin({ user, onNavigate, onSelectPost, onStartChat }: A
         </div>
       ) : activeTab === 'users' ? (
         /* Users Data Table Section */
-        <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
-          <div className="p-5 border-b border-gray-100">
-            <h3 className="font-display font-semibold text-gray-900">注册读者 & 本站作者列表</h3>
-            <p className="text-xs text-gray-400 mt-1">
-              可直接在列表操作中切换用户的角色 (Reader 读者 与 Author 作者)。
-            </p>
+        <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden text-left">
+          <div className="p-5 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              <h3 className="font-display font-semibold text-gray-900">注册读者 & 本站作者列表</h3>
+              <p className="text-xs text-gray-400 mt-1">
+                可直接在列表操作中切换用户的角色 (Reader 读者 与 Author 作者)。
+              </p>
+            </div>
+            
+            {/* Search input bar */}
+            <div className="relative max-w-xs w-full sm:w-64">
+              <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
+                <Search className="h-4 w-4" />
+              </span>
+              <input
+                type="text"
+                value={userSearch}
+                onChange={(e) => {
+                  setUserSearch(e.target.value);
+                  setUserPage(1);
+                }}
+                placeholder="搜索用户名、邮箱或UID..."
+                className="w-full pl-9 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-550 focus:bg-white transition-all text-gray-700"
+              />
+              {userSearch && (
+                <button
+                  onClick={() => {
+                    setUserSearch('');
+                    setUserPage(1);
+                  }}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-655"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="hidden md:block overflow-x-auto">
@@ -697,7 +865,14 @@ export default function Admin({ user, onNavigate, onSelectPost, onStartChat }: A
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 text-sm">
-                {usersList.map((target) => (
+                {paginatedUsersList.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="text-center py-12 text-gray-400 italic text-xs">
+                      {userSearch ? '未找到符合搜索条件的用户' : '暂无用户数据'}
+                    </td>
+                  </tr>
+                ) : (
+                  paginatedUsersList.map((target) => (
                   <tr key={target.firebaseUid} className="hover:bg-gray-50/50 transition-colors">
                     <td className="py-4 px-6 flex items-center gap-3">
                       <img
@@ -778,113 +953,216 @@ export default function Admin({ user, onNavigate, onSelectPost, onStartChat }: A
                             <ShieldAlert className="h-3 w-3" />
                             {target.status === 'frozen' ? '解除封禁' : '封禁账户'}
                           </button>
+
+                          <button
+                            onClick={() => handleMuteToggle(target)}
+                            className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border text-xs font-bold transition-all shadow-sm cursor-pointer ${
+                              target.isMuted
+                                ? 'bg-amber-50 border-amber-100 hover:bg-amber-100 text-amber-700'
+                                : 'bg-zinc-50 border-zinc-100 hover:bg-zinc-100 text-zinc-750'
+                            }`}
+                          >
+                            {target.isMuted ? <VolumeX className="h-3 w-3" /> : <Volume2 className="h-3 w-3" />}
+                            {target.isMuted ? '解除禁言' : '禁言限制'}
+                          </button>
                         </div>
                       )}
                     </td>
                   </tr>
-                ))}
+                )))}
               </tbody>
             </table>
           </div>
 
           {/* Mobile Card Layout */}
           <div className="block md:hidden space-y-4 p-4 bg-gray-50/30">
-            {usersList.map((target) => (
-              <div key={target.firebaseUid} className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <img
-                      src={target.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80'}
-                      alt={target.username}
-                      className="h-9 w-9 rounded-full object-cover border border-gray-200"
-                    />
-                    <div>
-                      <h4 className="font-bold text-gray-950 text-sm">{target.username}</h4>
-                      <p className="text-[10px] text-gray-400 font-mono">{new Date(target.createdAt).toLocaleDateString()} 注册</p>
+            {paginatedUsersList.length === 0 ? (
+              <div className="text-center py-12 text-gray-400 italic text-xs bg-white rounded-2xl border border-gray-100">
+                {userSearch ? '未找到符合搜索条件的用户' : '暂无用户数据'}
+              </div>
+            ) : (
+              paginatedUsersList.map((target) => (
+                <div key={target.firebaseUid} className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <img
+                        src={target.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80'}
+                        alt={target.username}
+                        className="h-9 w-9 rounded-full object-cover border border-gray-200"
+                      />
+                      <div>
+                        <h4 className="font-bold text-gray-950 text-sm">{target.username}</h4>
+                        <p className="text-[10px] text-gray-400 font-mono">{new Date(target.createdAt).toLocaleDateString()} 注册</p>
+                      </div>
+                    </div>
+                    <div className="flex flex-col items-end gap-1">
+                      <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${
+                        target.role === 'owner' ? 'bg-indigo-100 text-indigo-800' :
+                        target.role === 'author' ? 'bg-emerald-100 text-emerald-800' :
+                        'bg-gray-100 text-gray-700'
+                      }`}>
+                        {target.role === 'owner' ? '管理员' : 
+                         target.role === 'author' ? (
+                           target.level === 'vip' ? '👑 特邀作者' :
+                           target.level === 'signed' ? '✒️ 签约作者' :
+                           '📖 普通作者'
+                         ) : '读者'}
+                      </span>
+
+                      {target.role === 'author' && (
+                        <select
+                          value={target.level || 'normal'}
+                          onChange={async (e) => {
+                            const nextLevel = e.target.value as 'normal' | 'signed' | 'vip';
+                            try {
+                              const userRef = doc(db, 'users', target.firebaseUid);
+                              await updateDoc(userRef, { level: nextLevel });
+                            } catch (err: any) {
+                              alert("更新作者等级失败：" + err.message);
+                            }
+                          }}
+                          className="text-[9px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-200/40 rounded px-1 py-0.5 focus:outline-none mt-1"
+                        >
+                          <option value="normal">普通作者</option>
+                          <option value="signed">签约作者</option>
+                          <option value="vip">特邀作者</option>
+                        </select>
+                      )}
                     </div>
                   </div>
-                  <div className="flex flex-col items-end gap-1">
-                    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${
-                      target.role === 'owner' ? 'bg-indigo-100 text-indigo-800' :
-                      target.role === 'author' ? 'bg-emerald-100 text-emerald-800' :
-                      'bg-gray-100 text-gray-700'
-                    }`}>
-                      {target.role === 'owner' ? '管理员' : 
-                       target.role === 'author' ? (
-                         target.level === 'vip' ? '👑 特邀作者' :
-                         target.level === 'signed' ? '✒️ 签约作者' :
-                         '📖 普通作者'
-                       ) : '读者'}
-                    </span>
+                  
+                  <div className="text-xs text-gray-650 border-t border-gray-100 pt-2.5 flex items-center justify-between gap-2">
+                    <span className="truncate max-w-[150px] font-medium">{target.email}</span>
+                    <div className="flex flex-wrap gap-2.5">
+                      {target.role === 'owner' ? (
+                        <span className="text-[11px] text-gray-400 italic font-semibold">超级管理员（我）</span>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => handleRoleToggle(target)}
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-all shadow-sm cursor-pointer ${
+                              target.role === 'reader' 
+                                ? 'bg-indigo-600 border-indigo-700 hover:bg-indigo-550 text-white' 
+                                : 'bg-white border-gray-200 hover:border-gray-300 text-gray-700'
+                            }`}
+                          >
+                            <KeyRound className="h-3 w-3" />
+                            {target.role === 'reader' ? '晋升作者' : '解除授权'}
+                          </button>
 
-                    {target.role === 'author' && (
-                      <select
-                        value={target.level || 'normal'}
-                        onChange={async (e) => {
-                          const nextLevel = e.target.value as 'normal' | 'signed' | 'vip';
-                          try {
-                            const userRef = doc(db, 'users', target.firebaseUid);
-                            await updateDoc(userRef, { level: nextLevel });
-                          } catch (err: any) {
-                            alert("更新作者等级失败：" + err.message);
-                          }
-                        }}
-                        className="text-[9px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-200/40 rounded px-1 py-0.5 focus:outline-none mt-1"
-                      >
-                        <option value="normal">普通作者</option>
-                        <option value="signed">签约作者</option>
-                        <option value="vip">特邀作者</option>
-                      </select>
-                    )}
+                          <button
+                            onClick={() => handleFreezeToggle(target)}
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-all shadow-sm cursor-pointer ${
+                              target.status === 'frozen'
+                                ? 'bg-emerald-50 border-emerald-100 hover:bg-emerald-100 text-emerald-700'
+                                : 'bg-rose-50 border-rose-100 hover:bg-rose-100 text-rose-700'
+                            }`}
+                          >
+                            <ShieldAlert className="h-3 w-3" />
+                            {target.status === 'frozen' ? '解封' : '封禁'}
+                          </button>
+
+                          <button
+                            onClick={() => handleMuteToggle(target)}
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-all shadow-sm cursor-pointer ${
+                              target.isMuted
+                                ? 'bg-amber-50 border-amber-100 hover:bg-amber-100 text-amber-700'
+                                : 'bg-zinc-50 border-zinc-100 hover:bg-zinc-100 text-zinc-750'
+                            }`}
+                          >
+                            {target.isMuted ? <VolumeX className="h-3 w-3" /> : <Volume2 className="h-3 w-3" />}
+                            {target.isMuted ? '解禁' : '禁言'}
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
-                
-                <div className="text-xs text-gray-600 border-t border-gray-100 pt-2.5 flex items-center justify-between gap-2">
-                  <span className="truncate max-w-[150px] font-medium">{target.email}</span>
-                  <div className="flex flex-wrap gap-2.5">
-                    {target.role === 'owner' ? (
-                      <span className="text-[11px] text-gray-400 italic font-semibold">超级管理员（我）</span>
-                    ) : (
-                      <>
-                        <button
-                          onClick={() => handleRoleToggle(target)}
-                          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-all shadow-sm cursor-pointer ${
-                            target.role === 'reader' 
-                              ? 'bg-indigo-600 border-indigo-700 hover:bg-indigo-550 text-white' 
-                              : 'bg-white border-gray-200 hover:border-gray-300 text-gray-700'
-                          }`}
-                        >
-                          <KeyRound className="h-3 w-3" />
-                          {target.role === 'reader' ? '晋升作者' : '解除授权'}
-                        </button>
-
-                        <button
-                          onClick={() => handleFreezeToggle(target)}
-                          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-all shadow-sm cursor-pointer ${
-                            target.status === 'frozen'
-                              ? 'bg-emerald-50 border-emerald-100 hover:bg-emerald-100 text-emerald-700'
-                              : 'bg-rose-50 border-rose-100 hover:bg-rose-100 text-rose-700'
-                          }`}
-                        >
-                          <ShieldAlert className="h-3 w-3" />
-                          {target.status === 'frozen' ? '解封' : '封禁'}
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
+
+          {/* Pagination Footer */}
+          {totalUserPages > 1 && (
+            <div className="p-4 border-t border-gray-100 flex flex-col sm:flex-row items-center justify-between gap-3 bg-gray-50/50">
+              <span className="text-xs text-gray-500 font-semibold">
+                第 {userPage} / {totalUserPages} 页 (共 {filteredUsersList.length} 位用户)
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  disabled={userPage === 1}
+                  onClick={() => setUserPage(p => Math.max(1, p - 1))}
+                  className="px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                >
+                  上一页
+                </button>
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: totalUserPages }, (_, i) => i + 1)
+                    .filter(page => {
+                      return page === 1 || page === totalUserPages || Math.abs(page - userPage) <= 1;
+                    })
+                    .map((page, idx, arr) => {
+                      const showEllipsis = idx > 0 && page - arr[idx - 1] > 1;
+                      return (
+                        <div key={page} className="flex items-center gap-1">
+                          {showEllipsis && <span className="text-gray-400 text-xs px-1">...</span>}
+                          <button
+                            onClick={() => setUserPage(page)}
+                            className={`h-7 w-7 flex items-center justify-center rounded-lg text-xs font-bold transition-all ${
+                              userPage === page
+                                ? 'bg-indigo-600 text-white shadow-xs'
+                                : 'text-gray-655 hover:bg-gray-100'
+                            }`}
+                          >
+                            {page}
+                          </button>
+                        </div>
+                      );
+                    })}
+                </div>
+                <button
+                  disabled={userPage === totalUserPages}
+                  onClick={() => setUserPage(p => Math.min(totalUserPages, p + 1))}
+                  className="px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                >
+                  下一页
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       ) : activeTab === 'posts' ? (
         /* Posts Admin Table Section */
         <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
-          <div className="p-5 border-b border-gray-100">
-            <h3 className="font-display font-semibold text-gray-900">全站博文 & 草稿管理列表</h3>
-            <p className="text-xs text-gray-400 mt-1">
-              查看或永久删除站内存在的任何文章。
-            </p>
+          <div className="p-5 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 text-left">
+            <div>
+              <h3 className="font-display font-semibold text-gray-900">全站博文 & 草稿管理列表</h3>
+              <p className="text-xs text-gray-400 mt-1">
+                查看或永久删除站内存在的任何文章。
+              </p>
+            </div>
+
+            {/* Search input bar */}
+            <div className="relative max-w-xs w-full sm:w-64">
+              <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
+                <Search className="h-4 w-4" />
+              </span>
+              <input
+                type="text"
+                value={postSearch}
+                onChange={(e) => setPostSearch(e.target.value)}
+                placeholder="搜索博文标题、作者或ID..."
+                className="w-full pl-9 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-550 focus:bg-white transition-all text-gray-700"
+              />
+              {postSearch && (
+                <button
+                  onClick={() => setPostSearch('')}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-655"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="hidden md:block overflow-x-auto">
@@ -900,7 +1178,14 @@ export default function Admin({ user, onNavigate, onSelectPost, onStartChat }: A
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 text-sm">
-                {postsList.map((post) => (
+                {filteredPostsList.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="text-center py-12 text-gray-400 italic text-xs">
+                      {postSearch ? '未找到符合搜索条件的博文' : '暂无博文数据'}
+                    </td>
+                  </tr>
+                ) : (
+                  filteredPostsList.map((post) => (
                   <tr key={post.id} className="hover:bg-gray-50/50 transition-colors">
                     <td className="py-4 px-6">
                       <div className="flex items-center gap-3">
@@ -943,7 +1228,7 @@ export default function Admin({ user, onNavigate, onSelectPost, onStartChat }: A
                       {post.status === 'published' && (
                         <button
                           onClick={() => handleToggleRecommend(post)}
-                          className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border transition-all font-semibold text-xs shadow-sm cursor-pointer ${
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border transition-all font-semibold text-xs shadow-sm cursor-pointer ${
                             post.isRecommended && post.recommendedAt && (new Date().getTime() - new Date(post.recommendedAt).getTime() < 48 * 60 * 60 * 1000)
                               ? 'bg-amber-100 border-amber-200 text-amber-800 hover:bg-amber-200'
                               : 'bg-white border-amber-200 text-amber-700 hover:bg-amber-50'
@@ -962,93 +1247,123 @@ export default function Admin({ user, onNavigate, onSelectPost, onStartChat }: A
                       </button>
                     </td>
                   </tr>
-                ))}
+                )))}
               </tbody>
             </table>
           </div>
 
           {/* Mobile Card Layout */}
           <div className="block md:hidden space-y-4 p-4 bg-gray-50/30">
-            {postsList.map((post) => (
-              <div key={post.id} className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm space-y-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-2.5">
-                    <div className="h-10 w-16 rounded overflow-hidden border border-gray-200 shrink-0">
-                      <ImageWrapper
-                        src={post.images?.[0] || 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=150&q=80'}
-                        alt={post.title}
-                        width={150}
-                        isR18={post.isR18}
-                        className="w-full h-full object-cover"
-                        placeholderClassName="w-full h-full"
-                      />
-                    </div>
-                    <div>
-                      <button
-                        onClick={() => onSelectPost(post.id)}
-                        className="font-bold text-gray-950 text-xs text-left hover:underline line-clamp-1 flex items-center gap-1.5"
-                      >
-                        {post.isR18 && (
-                          <span className="shrink-0 bg-rose-100 text-rose-700 text-[9px] font-extrabold px-1.5 py-0.5 rounded-md uppercase tracking-wider font-mono">
-                            R18
-                          </span>
-                        )}
-                        <span>{post.title}</span>
-                      </button>
-                      <p className="text-[10px] text-gray-400 mt-1">
-                        作者: <span className="font-semibold text-gray-600">{post.authorName}</span>
-                      </p>
-                    </div>
-                  </div>
-                  
-                  <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold shrink-0 ${
-                    post.status === 'published' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                  }`}>
-                    {post.status === 'published' ? '公开' : '草稿'}
-                  </span>
-                </div>
-                
-                <div className="text-[11px] text-gray-500 border-t border-gray-100 pt-2.5 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <span className="font-mono">📅 {new Date(post.createdAt).toLocaleDateString()}</span>
-                    <span>❤️ {post.likes || 0} 赞</span>
-                  </div>
-                  
-                  <div className="flex items-center gap-2">
-                    {post.status === 'published' && (
-                      <button
-                        onClick={() => handleToggleRecommend(post)}
-                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg border transition-all font-semibold text-[11px] shadow-sm cursor-pointer ${
-                          post.isRecommended && post.recommendedAt && (new Date().getTime() - new Date(post.recommendedAt).getTime() < 48 * 60 * 60 * 1000)
-                            ? 'bg-amber-100 border-amber-200 text-amber-800'
-                            : 'bg-white border-amber-200 text-amber-700'
-                        }`}
-                      >
-                        <Star className={`h-3 w-3 ${post.isRecommended ? 'fill-amber-500 text-amber-600' : ''}`} />
-                        推荐
-                      </button>
-                    )}
-                    <button
-                      onClick={() => handlePostDelete(post)}
-                      className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-rose-50 border border-rose-100 text-rose-600 hover:bg-rose-100 transition-all font-semibold text-[11px] shadow-sm cursor-pointer"
-                    >
-                      <Trash2 className="h-3 w-3" />
-                      删除
-                    </button>
-                  </div>
-                </div>
+            {filteredPostsList.length === 0 ? (
+              <div className="text-center py-12 text-gray-400 italic text-xs bg-white rounded-2xl border border-gray-100">
+                {postSearch ? '未找到符合搜索条件的博文' : '暂无博文数据'}
               </div>
-            ))}
+            ) : (
+              filteredPostsList.map((post) => (
+                <div key={post.id} className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2.5">
+                      <div className="h-10 w-16 rounded overflow-hidden border border-gray-200 shrink-0">
+                        <ImageWrapper
+                          src={post.images?.[0] || 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=150&q=80'}
+                          alt={post.title}
+                          width={150}
+                          isR18={post.isR18}
+                          className="w-full h-full object-cover"
+                          placeholderClassName="w-full h-full"
+                        />
+                      </div>
+                      <div>
+                        <button
+                          onClick={() => onSelectPost(post.id)}
+                          className="font-bold text-gray-950 text-xs text-left hover:underline line-clamp-1 flex items-center gap-1.5"
+                        >
+                          {post.isR18 && (
+                            <span className="shrink-0 bg-rose-100 text-rose-700 text-[9px] font-extrabold px-1.5 py-0.5 rounded-md uppercase tracking-wider font-mono">
+                              R18
+                            </span>
+                          )}
+                          <span>{post.title}</span>
+                        </button>
+                        <p className="text-[10px] text-gray-400 mt-1">
+                          作者: <span className="font-semibold text-gray-600">{post.authorName}</span>
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold shrink-0 ${
+                      post.status === 'published' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                    }`}>
+                      {post.status === 'published' ? '公开' : '草稿'}
+                    </span>
+                  </div>
+                  
+                  <div className="text-[11px] text-gray-500 border-t border-gray-100 pt-2.5 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <span className="font-mono">📅 {new Date(post.createdAt).toLocaleDateString()}</span>
+                      <span>❤️ {post.likes || 0} 赞</span>
+                    </div>
+                    
+                    <div className="flex items-center gap-2">
+                      {post.status === 'published' && (
+                        <button
+                          onClick={() => handleToggleRecommend(post)}
+                          className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg border transition-all font-semibold text-[11px] shadow-sm cursor-pointer ${
+                            post.isRecommended && post.recommendedAt && (new Date().getTime() - new Date(post.recommendedAt).getTime() < 48 * 60 * 60 * 1000)
+                              ? 'bg-amber-100 border-amber-200 text-amber-800'
+                              : 'bg-white border-amber-200 text-amber-700'
+                          }`}
+                        >
+                          <Star className={`h-3 w-3 ${post.isRecommended ? 'fill-amber-500 text-amber-600' : ''}`} />
+                          推荐
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handlePostDelete(post)}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-rose-50 border border-rose-100 text-rose-600 hover:bg-rose-100 transition-all font-semibold text-[11px] shadow-sm cursor-pointer"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                        删除
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       ) : activeTab === 'applications' ? (
         /* Applications Admin Table Section */
         <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden text-left font-sans">
-          <div className="p-5 border-b border-gray-100">
-            <h3 className="font-display font-semibold text-gray-900">作者入驻审批中心</h3>
-            <p className="text-xs text-gray-400 mt-1">
-              审批站内读者升级为作者的申请。批准申请将会自动变更其角色，并同步发送系统贺信。
-            </p>
+          <div className="p-5 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              <h3 className="font-display font-semibold text-gray-900">作者入驻审批中心</h3>
+              <p className="text-xs text-gray-400 mt-1">
+                审批站内读者升级为作者的申请。批准申请将会自动变更其角色，并同步发送系统贺信。
+              </p>
+            </div>
+
+            {/* Search bar */}
+            <div className="relative max-w-xs w-full sm:w-64">
+              <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
+                <Search className="h-4 w-4" />
+              </span>
+              <input
+                type="text"
+                value={appSearch}
+                onChange={(e) => setAppSearch(e.target.value)}
+                placeholder="搜索申请人用户名、邮箱..."
+                className="w-full pl-9 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-550 focus:bg-white transition-all text-gray-700"
+              />
+              {appSearch && (
+                <button
+                  onClick={() => setAppSearch('')}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-655"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="hidden md:block overflow-x-auto">
@@ -1064,14 +1379,14 @@ export default function Admin({ user, onNavigate, onSelectPost, onStartChat }: A
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 text-sm">
-                {applicationsList.length === 0 ? (
+                {filteredApplicationsList.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="text-center py-12 text-gray-400 italic text-xs">
-                      暂无任何作者入驻申请记录
+                      {appSearch ? '未找到符合搜索条件的申请' : '暂无任何作者入驻申请记录'}
                     </td>
                   </tr>
                 ) : (
-                  applicationsList.map((app) => (
+                  filteredApplicationsList.map((app) => (
                     <tr key={app.id} className="hover:bg-gray-50/50 transition-colors">
                       <td className="py-4 px-6">
                         <div>
@@ -1143,12 +1458,12 @@ export default function Admin({ user, onNavigate, onSelectPost, onStartChat }: A
 
           {/* Mobile Applications Cards */}
           <div className="block md:hidden space-y-4 p-4 bg-gray-50/30">
-            {applicationsList.length === 0 ? (
+            {filteredApplicationsList.length === 0 ? (
               <div className="text-center py-12 text-gray-400 italic text-xs bg-white rounded-2xl border border-gray-100">
-                暂无任何作者入驻申请记录
+                {appSearch ? '未找到符合搜索条件的申请' : '暂无任何作者入驻申请记录'}
               </div>
             ) : (
-              applicationsList.map((app) => (
+              filteredApplicationsList.map((app) => (
                 <div key={app.id} className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm space-y-3">
                   <div className="flex items-start justify-between gap-2 border-b border-gray-50 pb-2.5">
                     <div>
@@ -1405,11 +1720,35 @@ export default function Admin({ user, onNavigate, onSelectPost, onStartChat }: A
       ) : (
         /* Reports Admin Table Section */
         <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden text-left font-sans">
-          <div className="p-5 border-b border-gray-100">
-            <h3 className="font-display font-semibold text-gray-900">举报内容审核中心</h3>
-            <p className="text-xs text-gray-400 mt-1">
-              核实并处理读者对博文/配图的举报。可选择「举报无效」保留博文，或「删除博文+警告作者」进行违规下架处理。
-            </p>
+          <div className="p-5 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              <h3 className="font-display font-semibold text-gray-900">举报内容审核中心</h3>
+              <p className="text-xs text-gray-400 mt-1">
+                核实并处理读者对博文/配图的举报。可选择「举报无效」保留博文，或「删除博文+警告作者」进行违规下架处理。
+              </p>
+            </div>
+
+            {/* Search bar */}
+            <div className="relative max-w-xs w-full sm:w-64">
+              <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
+                <Search className="h-4 w-4" />
+              </span>
+              <input
+                type="text"
+                value={reportSearch}
+                onChange={(e) => setReportSearch(e.target.value)}
+                placeholder="搜索举报原因、博文标题、UID..."
+                className="w-full pl-9 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-550 focus:bg-white transition-all text-gray-700"
+              />
+              {reportSearch && (
+                <button
+                  onClick={() => setReportSearch('')}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-655"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="hidden md:block overflow-x-auto">
@@ -1426,14 +1765,14 @@ export default function Admin({ user, onNavigate, onSelectPost, onStartChat }: A
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 text-sm">
-                {reportsList.length === 0 ? (
+                {filteredReportsList.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="text-center py-12 text-gray-400 italic text-xs">
-                      暂无任何用户举报记录
+                      {reportSearch ? '未找到符合搜索条件的举报记录' : '暂无任何用户举报记录'}
                     </td>
                   </tr>
                 ) : (
-                  reportsList.map((report) => (
+                  filteredReportsList.map((report) => (
                     <tr key={report.id} className="hover:bg-gray-50/50 transition-colors">
                       <td className="py-4 px-6">
                         <div>
@@ -1508,12 +1847,12 @@ export default function Admin({ user, onNavigate, onSelectPost, onStartChat }: A
 
           {/* Mobile Reports Cards */}
           <div className="block md:hidden space-y-4 p-4 bg-gray-50/30">
-            {reportsList.length === 0 ? (
+            {filteredReportsList.length === 0 ? (
               <div className="text-center py-12 text-gray-400 italic text-xs bg-white rounded-2xl border border-gray-100">
-                暂无任何用户举报记录
+                {reportSearch ? '未找到符合搜索条件的举报记录' : '暂无任何用户举报记录'}
               </div>
             ) : (
-              reportsList.map((report) => (
+              filteredReportsList.map((report) => (
                 <div key={report.id} className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm space-y-3">
                   <div className="flex items-start justify-between gap-2 border-b border-gray-50 pb-2.5">
                     <div className="min-w-0 flex-1">

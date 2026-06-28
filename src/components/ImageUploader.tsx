@@ -8,15 +8,18 @@ interface ImageUploaderProps {
   label?: string;
   className?: string;
   enableCrop?: boolean;
+  multiple?: boolean;
 }
 
 export default function ImageUploader({ 
   onUploadSuccess, 
   label = "上传图片", 
   className = "", 
-  enableCrop = true 
+  enableCrop = true,
+  multiple = false
 }: ImageUploaderProps) {
-  const [loading, setLoading] = useState(false);
+  const [activeUploads, setActiveUploads] = useState(0);
+  const loading = activeUploads > 0;
   const [error, setError] = useState<string | null>(null);
   const [base64ToCrop, setBase64ToCrop] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -42,41 +45,44 @@ export default function ImageUploader({
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    processSelectedFile(file);
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    processSelectedFiles(files);
   };
 
-  const processSelectedFile = (file: File) => {
-    // Validate file size (under 10MB)
-    if (file.size > 10 * 1024 * 1024) {
-      setError("图片文件大小不能超过 10MB");
-      return;
-    }
-
+  const processSelectedFiles = (files: FileList | File[]) => {
     setError(null);
+    const fileArray = Array.from(files);
 
-    if (enableCrop) {
-      // Load the selected file as Base64 to supply to the cropper
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        if (typeof reader.result === 'string') {
-          setBase64ToCrop(reader.result);
-        } else {
-          setError("读取图片失败");
-        }
-      };
-      reader.onerror = () => {
-        setError("无法打开该图片");
-      };
-      reader.readAsDataURL(file);
-    } else {
-      uploadFile(file);
-    }
+    fileArray.forEach(file => {
+      // Validate file size (under 10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        setError("部分图片文件大小超过了 10MB，已自动跳过");
+        return;
+      }
+
+      if (enableCrop && fileArray.length === 1) {
+        // Load the selected file as Base64 to supply to the cropper
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          if (typeof reader.result === 'string') {
+            setBase64ToCrop(reader.result);
+          } else {
+            setError("读取图片失败");
+          }
+        };
+        reader.onerror = () => {
+          setError("无法打开该图片");
+        };
+        reader.readAsDataURL(file);
+      } else {
+        uploadFile(file);
+      }
+    });
   };
 
   const uploadFile = async (file: File) => {
-    setLoading(true);
+    setActiveUploads(prev => prev + 1);
     setError(null);
 
     const { cloudName, uploadPreset } = getCloudinaryConfig();
@@ -110,7 +116,7 @@ export default function ImageUploader({
         // Fallback to Base64 so the application stays fully functional!
         fallbackToBase64(file);
       } finally {
-        setLoading(false);
+        setActiveUploads(prev => Math.max(0, prev - 1));
       }
     } else {
       // Direct Local fallback to Base64 string (meaningful, no mock data, fully functional out-of-the-box!)
@@ -119,19 +125,20 @@ export default function ImageUploader({
   };
 
   const fallbackToBase64 = (file: File) => {
+    // Make sure to increment active upload count first if not already tracked (called from fallback error)
     const reader = new FileReader();
     reader.onloadend = () => {
       if (typeof reader.result === 'string') {
         onUploadSuccess(reader.result);
-        setLoading(false);
+        setActiveUploads(prev => Math.max(0, prev - 1));
       } else {
         setError("无法读取图片文件");
-        setLoading(false);
+        setActiveUploads(prev => Math.max(0, prev - 1));
       }
     };
     reader.onerror = () => {
       setError("文件读取错误");
-      setLoading(false);
+      setActiveUploads(prev => Math.max(0, prev - 1));
     };
     reader.readAsDataURL(file);
   };
@@ -142,9 +149,9 @@ export default function ImageUploader({
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    const file = e.dataTransfer.files?.[0];
-    if (file && file.type.startsWith('image/')) {
-      processSelectedFile(file);
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      processSelectedFiles(files);
     }
   };
 
@@ -167,6 +174,7 @@ export default function ImageUploader({
           ref={fileInputRef}
           onChange={handleFileChange}
           accept="image/*"
+          multiple={multiple}
           className="hidden"
         />
 

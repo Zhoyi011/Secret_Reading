@@ -44,6 +44,7 @@ const TAG_CATEGORIES: Record<string, string[]> = {
 const AVAILABLE_TAGS = Object.values(TAG_CATEGORIES).flat();
 
 export default function Write({ user, draftId, onNavigate }: WriteProps) {
+  const isOwner = user && (user.role === 'owner' || user.email === 'zhoyilee@gmail.com');
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [images, setImages] = useState<string[]>([]);
@@ -276,6 +277,12 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
   const handlePublish = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
+
+    if (user.isMuted) {
+      alert("您已被管理员禁言，无法发布或修改文章。如有疑问请联系客服/站长。");
+      return;
+    }
+
     if (!title.trim()) {
       alert("请输入文章标题");
       return;
@@ -640,11 +647,13 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
             <div className="p-3 bg-gray-50 rounded-xl border border-gray-100 flex items-center justify-between">
               <span className="text-[11px] font-bold text-gray-500">当前创作者签约等级:</span>
               <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                isOwner ? 'bg-rose-100 text-rose-800 border border-rose-200' :
                 user?.level === 'vip' ? 'bg-amber-100 text-amber-800 border border-amber-200' :
                 user?.level === 'signed' ? 'bg-indigo-100 text-indigo-800 border border-indigo-200' :
                 'bg-gray-100 text-gray-700'
               }`}>
-                {user?.level === 'vip' ? '👑 特邀作家' :
+                {isOwner ? '👑 创办者 / 站长' :
+                 user?.level === 'vip' ? '👑 特邀作家' :
                  user?.level === 'signed' ? '✒️ 签约作家' :
                  '📖 普通作者'}
               </span>
@@ -654,18 +663,18 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <label className="text-[11px] font-bold text-gray-700">定时发布时间</label>
-                {(user?.level !== 'signed' && user?.level !== 'vip') && (
+                {!(user?.level === 'signed' || user?.level === 'vip' || isOwner) && (
                   <span className="text-[9px] text-indigo-600 bg-indigo-50 font-semibold px-1.5 py-0.5 rounded">🔒 签约专属</span>
                 )}
               </div>
               <input
                 type="datetime-local"
-                disabled={user?.level !== 'signed' && user?.level !== 'vip'}
+                disabled={!(user?.level === 'signed' || user?.level === 'vip' || isOwner)}
                 value={publishAt}
                 onChange={(e) => setPublishAt(e.target.value)}
                 className="block w-full rounded-xl border border-gray-200 p-2.5 text-xs text-gray-850 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100 font-medium font-mono disabled:opacity-55 disabled:bg-gray-50/50"
               />
-              {publishAt && (user?.level === 'signed' || user?.level === 'vip') && (
+              {publishAt && (user?.level === 'signed' || user?.level === 'vip' || isOwner) && (
                 <div className="flex items-center justify-between text-[10px] text-gray-450 pt-1">
                   <span>预计：{new Date(publishAt).toLocaleString()}</span>
                   <button
@@ -683,7 +692,7 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
             <div className="border-t border-gray-100 pt-3.5 space-y-2">
               <div className="flex items-center justify-between">
                 <label className="text-[11px] font-bold text-gray-700">作品置顶选项</label>
-                {user?.level !== 'vip' && (
+                {!(user?.level === 'vip' || isOwner) && (
                   <span className="text-[9px] text-amber-600 bg-amber-50 font-semibold px-1.5 py-0.5 rounded">🔒 特邀专属</span>
                 )}
               </div>
@@ -691,7 +700,7 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
               <label className="flex items-center gap-2 p-2.5 rounded-xl border border-gray-150/80 hover:bg-gray-50/30 transition-all cursor-pointer">
                 <input
                   type="checkbox"
-                  disabled={user?.level !== 'vip'}
+                  disabled={!(user?.level === 'vip' || isOwner)}
                   checked={isPinned}
                   onChange={(e) => setIsPinned(e.target.checked)}
                   className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4 border-gray-300 disabled:opacity-50"
@@ -852,9 +861,10 @@ export default function Write({ user, draftId, onNavigate }: WriteProps) {
             </p>
 
             <ImageUploader
-              label="添加高清配图"
+              label="添加高清配图（支持多选）"
               onUploadSuccess={handleAuxImageAdded}
               enableCrop={false}
+              multiple={true}
             />
 
             {images.length > 0 && (

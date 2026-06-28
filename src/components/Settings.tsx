@@ -234,42 +234,6 @@ export default function Settings({ user, onBack }: SettingsProps) {
           </div>
         </form>
       </div>
-
-      {/* Modern MongoDB Real-time Active Cluster Panel */}
-      <div className="bg-slate-900 text-slate-100 rounded-3xl border border-slate-800 p-6 shadow-md space-y-4 font-mono text-[11px]">
-        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-          <div className="flex items-center gap-2">
-            <Database className="h-4.5 w-4.5 text-emerald-400 shrink-0" />
-            <span className="font-bold text-xs text-white">MongoDB Active Node Cluster</span>
-          </div>
-          <div className="flex items-center gap-1.5 text-[9px] bg-emerald-950 text-emerald-400 px-2.5 py-0.5 rounded-full border border-emerald-900 font-bold">
-            <span className="h-1.5 w-1.5 bg-emerald-400 rounded-full animate-ping" />
-            <span>CONNECTED</span>
-          </div>
-        </div>
-
-        <p className="text-slate-400 leading-normal">
-          系统检测到 MongoDB 双通道持久层已开启。您的账户参数已实时映射至 NoSQL JSON 集群文档：
-        </p>
-
-        <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 leading-normal overflow-x-auto text-[10px] text-emerald-300">
-          <div>{'{'}</div>
-          <div className="pl-4"><span className="text-slate-400">"_id":</span> <span className="text-amber-300">"ObjectId('{mongoDoc?._id || '667501a3fedb6329fc...' }')"</span>,</div>
-          <div className="pl-4"><span className="text-slate-400">"firebaseUid":</span> <span className="text-teal-300">"{user.firebaseUid}"</span>,</div>
-          <div className="pl-4"><span className="text-slate-400">"username":</span> <span className="text-teal-300">"{username || user.username}"</span>,</div>
-          <div className="pl-4"><span className="text-slate-400">"avatar":</span> <span className="text-teal-300">"{avatar ? (avatar.length > 50 ? avatar.slice(0, 50) + "..." : avatar) : 'Default'}"</span>,</div>
-          <div className="pl-4"><span className="text-slate-400">"role":</span> <span className="text-teal-300">"{user.role}"</span>,</div>
-          <div className="pl-4"><span className="text-slate-400">"filterR18":</span> <span className="text-amber-300">{filterR18 ? 'true' : 'false'}</span>,</div>
-          <div className="pl-4"><span className="text-slate-400">"updatedAt":</span> <span className="text-amber-300">"{mongoDoc?.updatedAt || new Date().toISOString()}"</span>,</div>
-          <div className="pl-4"><span className="text-slate-400">"__v":</span> <span className="text-amber-300">{mongoDoc?.__v || 0}</span></div>
-          <div>{'}'}</div>
-        </div>
-
-        <div className="flex items-center gap-1.5 text-slate-400 text-[10px] bg-slate-950/40 p-2.5 rounded-xl border border-slate-800/40">
-          <Code className="h-4 w-4 text-slate-400" />
-          <span>URI: mongo-srv://private:***@cluster.reading.mongodb.net</span>
-        </div>
-      </div>
     </div>
   );
 }

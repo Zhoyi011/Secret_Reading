@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { doc, getDoc, updateDoc, deleteDoc, setDoc, addDoc, collection, onSnapshot, query, where, getDocs } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { Post, AppUser, Bookmark, Comment, CommentReply } from '../types';
+import { Post, AppUser, Bookmark, Comment, CommentReply, ShortReview, AuthorQuestion } from '../types';
 import MarkdownRenderer from './MarkdownRenderer';
 import SeriesDirectory from './SeriesDirectory';
-import { ArrowLeft, Heart, Calendar, User, Trash2, Edit, Loader2, Sparkles, AlertTriangle, CheckCircle, X, Copy, UserPlus, UserCheck, MessageSquare, Bookmark as BookmarkIcon, Check, AlertCircle, ChevronDown, Download, Star } from 'lucide-react';
+import { ArrowLeft, Heart, Calendar, User, Trash2, Edit, Loader2, Sparkles, AlertTriangle, CheckCircle, X, Copy, UserPlus, UserCheck, MessageSquare, Bookmark as BookmarkIcon, Check, AlertCircle, ChevronDown, Download, Star, BookOpen } from 'lucide-react';
 import ImageWrapper from './ImageWrapper';
 
 interface PostDetailProps {
@@ -16,9 +16,11 @@ interface PostDetailProps {
   onSelectPost?: (postId: string) => void;
   onStartChat?: (authorId: string) => void;
   onSelectAuthor?: (authorId: string) => void;
+  isFocusMode?: boolean;
+  onToggleFocusMode?: (focused: boolean) => void;
 }
 
-export default function PostDetail({ postId, user, onNavigate, onEditPost, onBack, onSelectPost, onStartChat, onSelectAuthor }: PostDetailProps) {
+export default function PostDetail({ postId, user, onNavigate, onEditPost, onBack, onSelectPost, onStartChat, onSelectAuthor, isFocusMode = false, onToggleFocusMode }: PostDetailProps) {
   const [post, setPost] = useState<Post | null>(null);
   const [loading, setLoading] = useState(true);
   const [liking, setLiking] = useState(false);
@@ -44,8 +46,42 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
     document.body.removeChild(element);
   };
 
+  const [recommending, setRecommending] = useState(false);
+
+  const handleToggleRecommend = async () => {
+    if (!post || !user || user.role !== 'owner' || recommending) return;
+    setRecommending(true);
+    try {
+      const postRef = doc(db, 'posts', post.id);
+      const currentlyRecommended = !!post.isRecommended;
+      const isStillValid = currentlyRecommended && post.recommendedAt && (new Date().getTime() - new Date(post.recommendedAt).getTime() < 48 * 60 * 60 * 1000);
+      
+      const newRecommendedState = !isStillValid;
+      const payload = {
+        isRecommended: newRecommendedState,
+        recommendedAt: newRecommendedState ? new Date().toISOString() : null,
+      };
+      
+      await updateDoc(postRef, payload);
+      setPost(prev => prev ? { ...prev, ...payload } : null);
+      setToastMessage({
+        type: 'success',
+        text: newRecommendedState ? '该作品已被站长亲自推荐，将在首页置顶展示48小时！' : '已取消站长推荐。',
+      });
+    } catch (err) {
+      console.error('Error toggling recommendation:', err);
+      setToastMessage({
+        type: 'error',
+        text: '更新推荐状态失败，请重试。'
+      });
+    } finally {
+      setRecommending(false);
+    }
+  };
+
   // Expanded state for R18 content
   const [isR18Expanded, setIsR18Expanded] = useState(false);
+  const [showR18Warning, setShowR18Warning] = useState(false);
 
   // Bookmark / Bookshelf state
   const [bookmarkState, setBookmarkState] = useState<'none' | 'want' | 'reading' | 'read'>('none');
@@ -66,6 +102,25 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
 
   // Recommendations
   const [relatedPosts, setRelatedPosts] = useState<Post[]>([]);
+  const [authorPosts, setAuthorPosts] = useState<Post[]>([]);
+  const [tagMatchedPosts, setTagMatchedPosts] = useState<Post[]>([]);
+  const [guessYouLikePosts, setGuessYouLikePosts] = useState<Post[]>([]);
+
+  // Reader Short Reviews (读后感) states
+  const [shortReviews, setShortReviews] = useState<ShortReview[]>([]);
+  const [newReview, setNewReview] = useState('');
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+
+  // Author Questions (问作者) states
+  const [authorQuestions, setAuthorQuestions] = useState<AuthorQuestion[]>([]);
+  const [newQuestion, setNewQuestion] = useState('');
+  const [questionSubmitting, setQuestionSubmitting] = useState(false);
+  const [answeringQuestionId, setAnsweringQuestionId] = useState<string | null>(null);
+  const [newAnswer, setNewAnswer] = useState('');
+  const [answerSubmitting, setAnswerSubmitting] = useState(false);
+
+  // Author growth level state
+  const [authorAllPosts, setAuthorAllPosts] = useState<Post[]>([]);
 
   // Series/连载 states
   const [seriesChapters, setSeriesChapters] = useState<Post[]>([]);
@@ -173,6 +228,10 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
             shortId: currentShortId,
           });
 
+          if (loadedData.isR18) {
+            setShowR18Warning(true);
+          }
+
           // Sync the window path to /authorName/shortId for independent-page feeling!
           window.history.pushState(null, '', `/${encodeURIComponent(loadedData.authorName)}/${currentShortId}`);
 
@@ -191,6 +250,37 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
 
     fetchPost();
   }, [postId]);
+
+  // Record access in history immediately when post is set
+  useEffect(() => {
+    if (!user || !post) return;
+    
+    const recordAccess = async () => {
+      try {
+        const historyRef = doc(db, 'history', `${user.firebaseUid}_${post.id}`);
+        // Fetch existing first to avoid resetting any previously saved higher scroll progress
+        const docSnap = await getDoc(historyRef);
+        let existingProgress = 0;
+        if (docSnap.exists()) {
+          existingProgress = docSnap.data().progress || 0;
+        }
+        await setDoc(historyRef, {
+          id: `${user.firebaseUid}_${post.id}`,
+          userId: user.firebaseUid,
+          postId: post.id,
+          postTitle: post.title,
+          authorName: post.authorName,
+          coverImage: post.coverImage || post.images?.[0] || '',
+          progress: existingProgress,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      } catch (err) {
+        console.warn("Failed to record access in history:", err);
+      }
+    };
+    
+    recordAccess();
+  }, [post?.id, user?.firebaseUid]);
 
   // Listen to follow status
   useEffect(() => {
@@ -254,28 +344,234 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
     return () => unsub();
   }, [postId, user]);
 
-  // Load related posts recommendations
+  // Load related posts and multi-way recommendations
   useEffect(() => {
-    const fetchRelated = async () => {
+    const fetchRecommendations = async () => {
       if (!post) return;
       try {
         const postsRef = collection(db, 'posts');
         const snap = await getDocs(query(postsRef, where('status', '==', 'published')));
         const loaded = snap.docs.map(d => ({ id: d.id, ...d.data() }) as Post);
         const filterR18Active = user?.filterR18 !== false;
-        const filtered = loaded.filter(p => {
+        
+        // Exclude current post and respect R18 filters
+        const eligiblePosts = loaded.filter(p => {
           if (p.id === post.id) return false;
           if (filterR18Active && p.isR18) return false;
           return true;
         });
-        setRelatedPosts(filtered.slice(0, 3));
+
+        // 1. 同作者更多作品
+        const sameAuthor = eligiblePosts
+          .filter(p => p.authorId === post.authorId)
+          .sort((a, b) => (b.views || 0) - (a.views || 0))
+          .slice(0, 3);
+        setAuthorPosts(sameAuthor);
+
+        // 2. 看过这篇的人也看了 (Overlap tags)
+        const matchedTags = eligiblePosts
+          .filter(p => p.authorId !== post.authorId) // different author
+          .map(p => {
+            const overlapCount = (p.tags || []).filter(t => (post.tags || []).includes(t)).length;
+            return { post: p, overlapCount };
+          })
+          .filter(item => item.overlapCount > 0)
+          .sort((a, b) => b.overlapCount - a.overlapCount || (b.post.likes || 0) - (a.post.likes || 0))
+          .map(item => item.post)
+          .slice(0, 3);
+        setTagMatchedPosts(matchedTags);
+
+        // 3. 猜你喜欢 (Overall top engaging, prioritizing shared tags with reader interests/history)
+        const guess = eligiblePosts
+          .filter(p => !sameAuthor.some(sa => sa.id === p.id) && !matchedTags.some(mt => mt.id === p.id))
+          .sort((a, b) => {
+            const scoreA = (a.likes || 0) * 3 + (a.views || 0) + (a.collects || 0) * 5;
+            const scoreB = (b.likes || 0) * 3 + (b.views || 0) + (b.collects || 0) * 5;
+            return scoreB - scoreA;
+          })
+          .slice(0, 3);
+        setGuessYouLikePosts(guess);
+
+        // Fallback for legacy relatedPosts state (keep it working so no compilation/prop bugs)
+        setRelatedPosts(eligiblePosts.slice(0, 3));
       } catch (err) {
-        console.warn("Failed to fetch related posts:", err);
+        console.warn("Failed to fetch recommendations:", err);
       }
     };
 
-    fetchRelated();
+    fetchRecommendations();
   }, [post, user?.filterR18]);
+
+  // Reader Short Reviews (读后感) real-time listener
+  useEffect(() => {
+    if (!postId) return;
+    const q = query(collection(db, 'short_reviews'), where('postId', '==', postId));
+    const unsub = onSnapshot(q, (snap) => {
+      const loaded: ShortReview[] = [];
+      snap.forEach((d) => {
+        loaded.push({ id: d.id, ...d.data() } as ShortReview);
+      });
+      // Sort: Featured first, then newest first
+      loaded.sort((a, b) => {
+        if (a.isFeatured !== b.isFeatured) {
+          return a.isFeatured ? -1 : 1;
+        }
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      });
+      setShortReviews(loaded);
+    }, (err) => {
+      console.error("Failed to load short reviews:", err);
+    });
+    return () => unsub();
+  }, [postId]);
+
+  // Author Questions (问作者) real-time listener
+  useEffect(() => {
+    if (!postId) return;
+    const q = query(collection(db, 'questions'), where('postId', '==', postId));
+    const unsub = onSnapshot(q, (snap) => {
+      const loaded: AuthorQuestion[] = [];
+      snap.forEach((d) => {
+        loaded.push({ id: d.id, ...d.data() } as AuthorQuestion);
+      });
+      // Sort: Newest first
+      loaded.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      setAuthorQuestions(loaded);
+    }, (err) => {
+      console.error("Failed to load author questions:", err);
+    });
+    return () => unsub();
+  }, [postId]);
+
+  // Fetch author posts to calculate growth level
+  useEffect(() => {
+    if (!post?.authorId) return;
+    const q = query(collection(db, 'posts'), where('authorId', '==', post.authorId), where('status', '==', 'published'));
+    getDocs(q).then(snap => {
+      const loaded = snap.docs.map(d => ({ id: d.id, ...d.data() }) as Post);
+      setAuthorAllPosts(loaded);
+    }).catch(err => console.error("Failed to load author all posts for level:", err));
+  }, [post?.authorId]);
+
+  // Helper functions for short reviews and questions
+  const handleSubmitReview = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !postId || !newReview.trim() || reviewSubmitting) return;
+    setReviewSubmitting(true);
+    try {
+      await addDoc(collection(db, 'short_reviews'), {
+        postId,
+        userId: user.firebaseUid,
+        username: user.username,
+        avatar: user.avatar || '',
+        content: newReview.trim(),
+        isFeatured: false,
+        createdAt: new Date().toISOString()
+      });
+      setNewReview('');
+      setToastMessage({ type: 'success', text: '发布短评成功！欢迎作者精选推荐。' });
+    } catch (err) {
+      console.error("Failed to submit short review:", err);
+      setToastMessage({ type: 'error', text: '发布失败，请重试。' });
+    } finally {
+      setReviewSubmitting(false);
+    }
+  };
+
+  const handleToggleFeatureReview = async (reviewId: string, currentFeatured: boolean) => {
+    if (!user || !post || user.firebaseUid !== post.authorId) return;
+    try {
+      const reviewRef = doc(db, 'short_reviews', reviewId);
+      await updateDoc(reviewRef, { isFeatured: !currentFeatured });
+      setToastMessage({ type: 'success', text: !currentFeatured ? '已设为精选短评！将在顶部优先展示。' : '已取消精选。' });
+    } catch (err) {
+      console.error("Failed to toggle feature review:", err);
+    }
+  };
+
+  const handleAskQuestion = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !postId || !newQuestion.trim() || questionSubmitting) return;
+    setQuestionSubmitting(true);
+    try {
+      await addDoc(collection(db, 'questions'), {
+        postId,
+        userId: user.firebaseUid,
+        username: user.username,
+        avatar: user.avatar || '',
+        question: newQuestion.trim(),
+        createdAt: new Date().toISOString()
+      });
+      setNewQuestion('');
+      setToastMessage({ type: 'success', text: '提问成功！请耐心等待作者回复。' });
+    } catch (err) {
+      console.error("Failed to submit question:", err);
+      setToastMessage({ type: 'error', text: '提问失败，请重试。' });
+    } finally {
+      setQuestionSubmitting(false);
+    }
+  };
+
+  const handleAnswerQuestion = async (questionId: string) => {
+    if (!user || !post || user.firebaseUid !== post.authorId || !newAnswer.trim() || answerSubmitting) return;
+    setAnswerSubmitting(true);
+    try {
+      const questionRef = doc(db, 'questions', questionId);
+      await updateDoc(questionRef, {
+        answer: newAnswer.trim(),
+        answeredAt: new Date().toISOString()
+      });
+      setNewAnswer('');
+      setAnsweringQuestionId(null);
+      setToastMessage({ type: 'success', text: '已回复读者提问！' });
+    } catch (err) {
+      console.error("Failed to answer question:", err);
+      setToastMessage({ type: 'error', text: '回复失败，请重试。' });
+    } finally {
+      setAnswerSubmitting(false);
+    }
+  };
+
+  // Author Growth Level MEMO
+  const authorGrowth = React.useMemo(() => {
+    const count = authorAllPosts.length;
+    const totalLikes = authorAllPosts.reduce((sum, p) => sum + (p.likes || 0), 0);
+    const totalViews = authorAllPosts.reduce((sum, p) => sum + (p.views || 0), 0);
+    const points = count * 20 + totalLikes * 8 + totalViews * 1;
+    
+    let level = '青铜作家';
+    let nextLevel = '白银作家';
+    let minPoints = 0;
+    let nextPoints = 120;
+    let badgeColor = 'from-amber-600 to-amber-500';
+    let icon = '🥉';
+    
+    if (points >= 1500) {
+      level = '钻石作家';
+      nextLevel = '已达最高级';
+      minPoints = 1500;
+      nextPoints = 1500;
+      badgeColor = 'from-cyan-600 to-indigo-500';
+      icon = '💎';
+    } else if (points >= 500) {
+      level = '黄金作家';
+      nextLevel = '钻石作家';
+      minPoints = 500;
+      nextPoints = 1500;
+      badgeColor = 'from-yellow-500 to-amber-500';
+      icon = '🥇';
+    } else if (points >= 120) {
+      level = '白银作家';
+      nextLevel = '黄金作家';
+      minPoints = 120;
+      nextPoints = 500;
+      badgeColor = 'from-slate-500 to-slate-400';
+      icon = '🥈';
+    }
+    
+    const percent = nextPoints === minPoints ? 100 : Math.min(100, Math.max(0, ((points - minPoints) / (nextPoints - minPoints)) * 100));
+    return { level, nextLevel, points, nextPoints, percent, badgeColor, icon };
+  }, [authorAllPosts]);
 
   // Throttled Reading progress & History tracking
   useEffect(() => {
@@ -544,6 +840,12 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
     e.preventDefault();
     if (!user || !post || !newCommentText.trim()) return;
 
+    if (user.isMuted) {
+      setToastMessage({ type: 'error', text: "您已被管理员禁言，无法发表评论。如有疑问请联系客服/站长。" });
+      setTimeout(() => setToastMessage(null), 4000);
+      return;
+    }
+
     setSubmittingComment(true);
     try {
       const commentsRef = collection(db, 'comments');
@@ -571,6 +873,12 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
 
   const handleAddReply = async (commentId: string) => {
     if (!user || !post || !replyText.trim()) return;
+
+    if (user.isMuted) {
+      setToastMessage({ type: 'error', text: "您已被管理员禁言，无法进行回复。如有疑问请联系客服/站长。" });
+      setTimeout(() => setToastMessage(null), 4000);
+      return;
+    }
 
     try {
       const commentRef = doc(db, 'comments', commentId);
@@ -716,49 +1024,85 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
       </div>
 
       {/* Navigator headers */}
-      <div className="flex items-center justify-between gap-4 mb-8">
-        <button
-          onClick={onBack}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-gray-100 text-gray-500 hover:text-gray-700 hover:bg-gray-50 transition-all font-medium text-xs shadow-sm"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          返回列表
-        </button>
+      {!isFocusMode ? (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-8">
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+            <button
+              onClick={onBack}
+              className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-gray-100 text-gray-500 hover:text-gray-700 hover:bg-gray-50 transition-all font-medium text-xs shadow-sm cursor-pointer"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              <span>返回列表</span>
+            </button>
 
-        {user && (isAuthor || isAdminOrOwner) && (
-          <div className="flex items-center gap-2">
-            {isAuthor && (
-              <>
-                <button
-                  onClick={handleDownloadMarkdown}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-100 text-emerald-600 hover:bg-emerald-100 transition-all text-xs font-semibold cursor-pointer"
-                  title="导出文章为 Markdown 源文件"
-                >
-                  <Download className="h-3.5 w-3.5" />
-                  导出 Markdown
-                </button>
-                <button
-                  onClick={() => onEditPost(post.id)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-600 hover:bg-indigo-100 transition-all text-xs font-semibold"
-                >
-                  <Edit className="h-3.5 w-3.5" />
-                  修改编辑文章
-                </button>
-              </>
-            )}
-
-            {(isAuthor || isAdminOrOwner) && (
-              <button
-                onClick={initiateDelete}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-50 border border-rose-100 text-rose-600 hover:bg-rose-100 transition-all text-xs font-semibold"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                删除文章
-              </button>
-            )}
+            <button
+              onClick={() => onToggleFocusMode?.(true)}
+              className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-600 hover:bg-indigo-100 hover:text-indigo-700 transition-all font-bold text-xs shadow-sm cursor-pointer"
+              title="进入无干扰沉浸阅读模式"
+            >
+              <BookOpen className="h-3.5 w-3.5 text-indigo-500" />
+              <span>沉浸模式</span>
+            </button>
           </div>
-        )}
-      </div>
+
+          {user && (isAuthor || isAdminOrOwner) && (
+            <div className="flex flex-wrap items-center justify-end gap-1.5 w-full sm:w-auto">
+              {user.role === 'owner' && post.status === 'published' && (
+                <button
+                  disabled={recommending}
+                  onClick={handleToggleRecommend}
+                  className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border transition-all text-xs font-semibold cursor-pointer disabled:opacity-50 ${
+                    post.isRecommended && post.recommendedAt && (new Date().getTime() - new Date(post.recommendedAt).getTime() < 48 * 60 * 60 * 1000)
+                      ? 'bg-amber-100 border-amber-200 text-amber-800 hover:bg-amber-200'
+                      : 'bg-white border-amber-200 text-amber-700 hover:bg-amber-50'
+                  }`}
+                  title="置顶推荐博文 48 小时"
+                >
+                  <Star className={`h-3.5 w-3.5 ${post.isRecommended && post.recommendedAt && (new Date().getTime() - new Date(post.recommendedAt).getTime() < 48 * 60 * 60 * 1000) ? 'fill-amber-500 text-amber-600' : ''}`} />
+                  <span className="hidden sm:inline">
+                    {post.isRecommended && post.recommendedAt && (new Date().getTime() - new Date(post.recommendedAt).getTime() < 48 * 60 * 60 * 1000) ? '取消推荐' : '站长推荐'}
+                  </span>
+                  <span className="sm:hidden">推荐</span>
+                </button>
+              )}
+              {isAuthor && (
+                <>
+                  <button
+                    onClick={handleDownloadMarkdown}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-50 border border-emerald-100 text-emerald-600 hover:bg-emerald-100 transition-all text-xs font-semibold cursor-pointer"
+                    title="导出文章为 Markdown 源文件"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">导出 Markdown</span>
+                    <span className="sm:hidden">导出</span>
+                  </button>
+                  <button
+                    onClick={() => onEditPost(post.id)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-600 hover:bg-indigo-100 transition-all text-xs font-semibold"
+                    title="编辑文章"
+                  >
+                    <Edit className="h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">修改编辑</span>
+                    <span className="sm:hidden">编辑</span>
+                  </button>
+                </>
+              )}
+
+              {(isAuthor || isAdminOrOwner) && (
+                <button
+                  onClick={initiateDelete}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-rose-50 border border-rose-100 text-rose-600 hover:bg-rose-100 transition-all text-xs font-semibold"
+                  title="删除文章"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">删除文章</span>
+                  <span className="sm:hidden">删除</span>
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      ) : null}
 
       {/* Main post container */}
       <article className="bg-white rounded-3xl border border-gray-100 shadow-sm p-6 sm:p-10 space-y-6">
@@ -772,43 +1116,45 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
               )}
               <span>{post.title}</span>
             </h1>
-            <div className="flex flex-wrap gap-2 self-start shrink-0">
-              <button
-                onClick={handleCopyTitle}
-                className="allow-copy shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-gray-150 text-gray-500 hover:text-indigo-600 hover:border-indigo-100 hover:bg-indigo-50/50 transition-all text-xs font-semibold shadow-2xs cursor-pointer"
-                title="拷贝这篇博文的标题"
-              >
-                {copiedTitle ? (
-                  <>
-                    <CheckCircle className="h-3.5 w-3.5 text-emerald-500" />
-                    <span className="text-emerald-600">已拷贝</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="h-3.5 w-3.5" />
-                    <span>拷贝标题</span>
-                  </>
-                )}
-              </button>
+            {!isFocusMode && (
+              <div className="flex flex-wrap gap-2 self-start shrink-0">
+                <button
+                  onClick={handleCopyTitle}
+                  className="allow-copy shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-gray-150 text-gray-500 hover:text-indigo-600 hover:border-indigo-100 hover:bg-indigo-50/50 transition-all text-xs font-semibold shadow-2xs cursor-pointer"
+                  title="拷贝这篇博文的标题"
+                >
+                  {copiedTitle ? (
+                    <>
+                      <CheckCircle className="h-3.5 w-3.5 text-emerald-500" />
+                      <span className="text-emerald-600">已拷贝</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-3.5 w-3.5" />
+                      <span>拷贝标题</span>
+                    </>
+                  )}
+                </button>
 
-              <button
-                onClick={handleCopyLink}
-                className="allow-copy shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-gray-150 text-gray-500 hover:text-indigo-600 hover:border-indigo-100 hover:bg-indigo-50/50 transition-all text-xs font-semibold shadow-2xs cursor-pointer"
-                title="拷贝这篇博文的分享链接"
-              >
-                {copiedLink ? (
-                  <>
-                    <CheckCircle className="h-3.5 w-3.5 text-emerald-500" />
-                    <span className="text-emerald-600 font-bold">链接已复制</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="h-3.5 w-3.5 text-indigo-500 animate-pulse" />
-                    <span>复制分享链接</span>
-                  </>
-                )}
-              </button>
-            </div>
+                <button
+                  onClick={handleCopyLink}
+                  className="allow-copy shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-gray-150 text-gray-500 hover:text-indigo-600 hover:border-indigo-100 hover:bg-indigo-50/50 transition-all text-xs font-semibold shadow-2xs cursor-pointer"
+                  title="拷贝这篇博文的分享链接"
+                >
+                  {copiedLink ? (
+                    <>
+                      <CheckCircle className="h-3.5 w-3.5 text-emerald-500" />
+                      <span className="text-emerald-600 font-bold">链接已复制</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-3.5 w-3.5 text-indigo-500 animate-pulse" />
+                      <span>复制分享链接</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-4 text-xs text-gray-500 pt-2 pb-4 border-b border-gray-100/80">
@@ -824,8 +1170,17 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
                 <span>{post.authorName}</span>
               </div>
 
+              {/* Author Level Badge */}
+              <div 
+                className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-gradient-to-r ${authorGrowth.badgeColor} text-white shadow-3xs border border-white/25 cursor-help`}
+                title={`作者成长指数: ${authorGrowth.points} 积分。距离下一阶段需要 ${authorGrowth.nextPoints} 积分。`}
+              >
+                <span className="text-xs">{authorGrowth.icon}</span>
+                <span>{authorGrowth.level}</span>
+              </div>
+
               {/* Follow / Unfollow Button */}
-              {user && user.firebaseUid !== post.authorId && (
+              {user && user.firebaseUid !== post.authorId && !isFocusMode && (
                 <button
                   onClick={handleFollowToggle}
                   disabled={followingLoading}
@@ -852,7 +1207,7 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
               )}
 
               {/* Send Private Message Button */}
-              {user && user.firebaseUid !== post.authorId && onStartChat && (
+              {user && user.firebaseUid !== post.authorId && onStartChat && !isFocusMode && (
                 <button
                   onClick={() => onStartChat(post.authorId)}
                   className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold transition-all border border-gray-250 hover:bg-gray-50 text-gray-650 cursor-pointer shadow-2xs"
@@ -874,7 +1229,7 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
             </div>
 
             {/* Abuse Report action */}
-            {user && (
+            {user && !isFocusMode && (
               <button
                 onClick={() => setShowReportModal(true)}
                 className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-400 hover:text-rose-600 transition-colors"
@@ -889,7 +1244,9 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
         {/* Primary cover / gallery section */}
         {((post.images && post.images.length > 0) || post.coverImage) && (
           <div className="space-y-3">
-            <div className="max-w-md mx-auto w-full rounded-2xl overflow-hidden border border-gray-100 bg-gray-50 flex items-center justify-center max-h-[340px] p-1.5 shadow-2xs">
+            <div className={`max-w-md mx-auto w-full rounded-2xl overflow-hidden border border-gray-100 bg-gray-50 flex items-center justify-center max-h-[340px] p-1.5 shadow-2xs relative transition-all duration-500 ${
+              post.isR18 && !isR18Expanded ? 'filter blur-3xl saturate-0 scale-95 select-none pointer-events-none' : ''
+            }`}>
               <ImageWrapper
                 src={post.images?.[0] || post.coverImage}
                 alt="Post Cover Banner"
@@ -897,11 +1254,20 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
                 className="w-full h-auto max-h-[325px] object-contain rounded-xl select-none"
                 placeholderClassName="w-full h-auto max-h-[325px] rounded-xl"
               />
+              {post.isR18 && !isR18Expanded && (
+                <div className="absolute inset-0 bg-black/20 flex items-center justify-center p-3 text-center">
+                  <span className="bg-red-600/90 text-white text-[10px] font-bold px-2 py-1 rounded-lg shadow border border-red-500 flex items-center gap-1 animate-pulse">
+                    🔞 R18 限制级内容已打码
+                  </span>
+                </div>
+              )}
             </div>
             {post.images.length > 1 && (
               <div className="grid grid-cols-4 gap-2.5">
                 {post.images.slice(1).map((img, idx) => (
-                  <div key={idx} className="aspect-square sm:aspect-video rounded-xl overflow-hidden border border-gray-150/60 bg-gray-50 flex items-center justify-center p-0.5 hover:border-indigo-200 transition-colors cursor-zoom-in">
+                  <div key={idx} className={`aspect-square sm:aspect-video rounded-xl overflow-hidden border border-gray-150/60 bg-gray-50 flex items-center justify-center p-0.5 hover:border-indigo-200 transition-colors cursor-zoom-in relative transition-all duration-500 ${
+                    post.isR18 && !isR18Expanded ? 'filter blur-2xl saturate-0 select-none pointer-events-none' : ''
+                  }`}>
                     <ImageWrapper 
                       src={img} 
                       alt={`Gallery index ${idx}`} 
@@ -919,7 +1285,7 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
         {/* Article content renderer with R18 gate fold */}
         <div className="py-2 selection:bg-indigo-100">
           {post.isR18 && !isR18Expanded ? (
-            <div className="my-8 p-8 border border-red-200 bg-red-50/40 rounded-3xl text-center space-y-4 shadow-inner" id="r18-content-gate">
+            <div className="my-8 p-8 border border-red-250 bg-red-50/50 rounded-3xl text-center space-y-4 shadow-xs" id="r18-content-gate">
               <AlertTriangle className="h-10 w-10 text-red-650 mx-auto animate-bounce" />
               <div className="space-y-1">
                 <h4 className="text-sm font-bold text-gray-900">⚠️ 本文包含 R18 限制级敏感内容</h4>
@@ -928,8 +1294,11 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
                 </p>
               </div>
               <button
-                onClick={() => setIsR18Expanded(true)}
-                className="px-6 py-2.5 bg-red-650 hover:bg-red-700 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-red-600/10 cursor-pointer"
+                onClick={() => {
+                  setIsR18Expanded(true);
+                  setShowR18Warning(false);
+                }}
+                className="px-6 py-2.5 bg-red-600 hover:bg-red-700 text-white text-xs font-extrabold rounded-xl transition-all shadow-md shadow-red-600/20 cursor-pointer font-sans"
               >
                 确认展开内容 ➔
               </button>
@@ -1023,14 +1392,14 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
         )}
 
         {/* Bookshelf status category block */}
-        {user && (
+        {user && !isFocusMode && (
           <div className="mt-8 p-5 bg-gray-50 border border-gray-100 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-left">
             <div className="space-y-1">
               <h4 className="text-xs font-bold text-gray-700 flex items-center gap-1">
                 <BookmarkIcon className="h-4 w-4 text-indigo-600" />
                 <span>同步至我的读者书架</span>
               </h4>
-              <p className="text-[10px] text-gray-400 leading-normal">将文章归类至您的专属书架，便于后续一键追更及进度管理（当前阅读进度: {Math.round(scrollProgress)}%）。</p>
+              <p className="text-[10px] text-gray-400 leading-normal">将文章归类至您的专属书架，便于后续一键追更及进度 management（当前阅读进度: {Math.round(scrollProgress)}%）。</p>
             </div>
             
             <div className="flex flex-wrap items-center gap-2">
@@ -1064,45 +1433,395 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
           </div>
         )}
 
-        {/* Related Recommendations Block */}
-        {relatedPosts.length > 0 && (
-          <div className="mt-8 space-y-4 text-left">
-            <h4 className="font-display font-bold text-gray-950 text-sm flex items-center gap-2 border-b border-gray-100 pb-2">
-              <Sparkles className="h-4 w-4 text-amber-500 animate-pulse" />
-              <span>同人及专栏相关推荐</span>
-            </h4>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {relatedPosts.map((rPost) => (
-                <div
-                  key={rPost.id}
-                  onClick={() => {
-                    if (onSelectPost) {
-                      onSelectPost(rPost.id);
-                    } else {
-                      window.location.reload();
-                    }
-                  }}
-                  className="group bg-white border border-gray-100 rounded-xl p-3 shadow-2xs hover:shadow-sm cursor-pointer transition-all flex flex-col space-y-2 text-left"
-                >
-                  <div className="h-20 rounded-lg overflow-hidden bg-gray-50">
-                    <img
-                      src={rPost.coverImage || rPost.images?.[0] || 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=150&q=80'}
-                      alt={rPost.title}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    />
-                  </div>
-                  <h5 className="font-display font-semibold text-xs text-gray-900 group-hover:text-indigo-600 transition-colors line-clamp-1">
-                    {rPost.title}
-                  </h5>
-                  <p className="text-[10px] text-gray-400 line-clamp-1">作者: {rPost.authorName}</p>
+        {/* Smart Multi-dimensional Recommendations */}
+        {!isFocusMode && (
+          <div className="mt-12 space-y-8 text-left border-t border-gray-100 pt-8" id="smart-recommendations-panel">
+            {/* Row 1: Overlapping Tags matching - 看过这篇的人也看了 */}
+            {tagMatchedPosts.length > 0 && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between border-b border-gray-50 pb-2">
+                  <h4 className="font-display font-bold text-gray-800 text-xs sm:text-sm flex items-center gap-1.5">
+                    <Sparkles className="h-4 w-4 text-indigo-500" />
+                    <span>看过这篇的人也看了 (同类题材)</span>
+                  </h4>
+                  <span className="text-[10px] text-indigo-500 font-bold bg-indigo-50 px-2 py-0.5 rounded-full">标签重合度匹配</span>
                 </div>
-              ))}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {tagMatchedPosts.map((rPost) => (
+                    <div
+                      key={rPost.id}
+                      onClick={() => onSelectPost?.(rPost.id)}
+                      className="group bg-white border border-gray-100/80 rounded-xl p-3 shadow-3xs hover:shadow-2xs cursor-pointer transition-all flex flex-col space-y-2 text-left"
+                    >
+                      <div className="h-24 rounded-lg overflow-hidden bg-gray-50 relative shrink-0">
+                        <img
+                          src={rPost.coverImage || rPost.images?.[0] || 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=300&q=80'}
+                          alt={rPost.title}
+                          className="w-full h-full object-cover group-hover:scale-102 transition-transform duration-300"
+                        />
+                        {rPost.tags && rPost.tags.length > 0 && (
+                          <span className="absolute bottom-1.5 left-1.5 text-[8px] bg-black/70 text-white font-bold px-1.5 py-0.5 rounded">
+                            #{rPost.tags[0]}
+                          </span>
+                        )}
+                      </div>
+                      <h5 className="font-display font-bold text-xs text-gray-900 group-hover:text-indigo-600 transition-colors line-clamp-1">
+                        {rPost.title}
+                      </h5>
+                      <div className="flex items-center justify-between text-[10px] text-gray-400">
+                        <span>作者: {rPost.authorName}</span>
+                        <span className="text-rose-500 font-bold">❤️ {rPost.likes || 0}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Row 2: Same author - 同作者更多作品 */}
+            {authorPosts.length > 0 && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between border-b border-gray-50 pb-2">
+                  <h4 className="font-display font-bold text-gray-800 text-xs sm:text-sm flex items-center gap-1.5">
+                    <User className="h-4 w-4 text-emerald-500" />
+                    <span>该作者的更多作品</span>
+                  </h4>
+                  <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 rounded-full">名作推荐</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {authorPosts.map((rPost) => (
+                    <div
+                      key={rPost.id}
+                      onClick={() => onSelectPost?.(rPost.id)}
+                      className="group bg-white border border-gray-100/80 rounded-xl p-3 shadow-3xs hover:shadow-2xs cursor-pointer transition-all flex flex-col space-y-2 text-left"
+                    >
+                      <div className="h-24 rounded-lg overflow-hidden bg-gray-50 relative shrink-0">
+                        <img
+                          src={rPost.coverImage || rPost.images?.[0] || 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=300&q=80'}
+                          alt={rPost.title}
+                          className="w-full h-full object-cover group-hover:scale-102 transition-transform duration-300"
+                        />
+                      </div>
+                      <h5 className="font-display font-bold text-xs text-gray-900 group-hover:text-indigo-600 transition-colors line-clamp-1">
+                        {rPost.title}
+                      </h5>
+                      <div className="flex items-center justify-between text-[10px] text-gray-400 font-mono">
+                        <span>阅读量: {rPost.views || 0}</span>
+                        <span className="text-indigo-500">❤️ {rPost.likes || 0}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Row 3: Guess You Like - 猜你喜欢 */}
+            {guessYouLikePosts.length > 0 && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between border-b border-gray-50 pb-2">
+                  <h4 className="font-display font-bold text-gray-800 text-xs sm:text-sm flex items-center gap-1.5">
+                    <BookOpen className="h-4 w-4 text-purple-500" />
+                    <span>猜你喜欢 (全站热文推荐)</span>
+                  </h4>
+                  <span className="text-[10px] text-purple-600 font-bold bg-purple-50 px-2 py-0.5 rounded-full">高频互动匹配</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {guessYouLikePosts.map((rPost) => (
+                    <div
+                      key={rPost.id}
+                      onClick={() => onSelectPost?.(rPost.id)}
+                      className="group bg-white border border-gray-100/80 rounded-xl p-3 shadow-3xs hover:shadow-2xs cursor-pointer transition-all flex flex-col space-y-2 text-left"
+                    >
+                      <div className="h-24 rounded-lg overflow-hidden bg-gray-50 relative shrink-0">
+                        <img
+                          src={rPost.coverImage || rPost.images?.[0] || 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=300&q=80'}
+                          alt={rPost.title}
+                          className="w-full h-full object-cover group-hover:scale-102 transition-transform duration-300"
+                        />
+                      </div>
+                      <h5 className="font-display font-bold text-xs text-gray-900 group-hover:text-indigo-600 transition-colors line-clamp-1">
+                        {rPost.title}
+                      </h5>
+                      <div className="flex items-center justify-between text-[10px] text-gray-400">
+                        <span>作者: {rPost.authorName}</span>
+                        <span className="text-purple-500 font-mono">热度: {Math.round((rPost.views || 0) * 0.2 + (rPost.likes || 0) * 1.5)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Reader Short Review Wall (读者短评墙) */}
+        {!isFocusMode && (
+          <div className="mt-12 border-t border-gray-100 pt-8 text-left space-y-6" id="short-reviews-wall">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <div>
+                <h3 className="font-display font-bold text-gray-950 text-sm sm:text-base flex items-center gap-2">
+                  <Star className="h-5 w-5 text-amber-500 fill-amber-400 animate-pulse" />
+                  <span>读者精选短评墙</span>
+                </h3>
+                <p className="text-[10px] text-gray-400 mt-1">读罢此篇，写下一段简短的心得，优秀短评会被作者精选置顶噢！</p>
+              </div>
+              <span className="text-[10px] bg-amber-50 text-amber-700 font-bold px-2.5 py-1 rounded-full font-sans">
+                {shortReviews.length} 条微评
+              </span>
             </div>
+
+            {/* Submit Short Review Form */}
+            {user ? (
+              <form onSubmit={handleSubmitReview} className="bg-gray-50/50 border border-gray-100 rounded-2xl p-4 space-y-3">
+                <textarea
+                  value={newReview}
+                  onChange={(e) => setNewReview(e.target.value.slice(0, 200))}
+                  placeholder="畅言您对本章节的读后感或对CP的短评（200字以内）..."
+                  rows={2}
+                  maxLength={200}
+                  className="allow-paste w-full block rounded-xl border border-gray-250 p-3 text-xs text-gray-800 placeholder-gray-400 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+                <div className="flex items-center justify-between text-[10px]">
+                  <span className="text-gray-400 font-medium">当前字数：{newReview.length}/200</span>
+                  <button
+                    type="submit"
+                    disabled={!newReview.trim() || reviewSubmitting}
+                    className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-200 text-white font-bold rounded-xl text-xs transition-all shadow-3xs cursor-pointer flex items-center gap-1"
+                  >
+                    {reviewSubmitting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                    <span>发表短评</span>
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div className="text-center py-6 bg-gray-50 border border-dashed border-gray-200 rounded-2xl">
+                <p className="text-xs text-gray-500">请先登录后再发表读后感与精彩短评。</p>
+              </div>
+            )}
+
+            {/* Short Reviews List */}
+            {shortReviews.length === 0 ? (
+              <div className="text-center py-8 text-gray-400 text-xs italic">
+                还没有读者发表过短评。写下您的第一条微评，抢占沙发吧！
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {shortReviews.map((review) => {
+                  const isPostAuthor = user && post && user.firebaseUid === post.authorId;
+                  return (
+                    <div
+                      key={review.id}
+                      className={`relative bg-white rounded-2xl p-4 border transition-all flex flex-col justify-between gap-3 ${
+                        review.isFeatured
+                          ? 'border-amber-200 shadow-3xs bg-amber-50/10'
+                          : 'border-gray-100 shadow-3xs hover:border-gray-200'
+                      }`}
+                    >
+                      {/* Featured pin badge */}
+                      {review.isFeatured && (
+                        <div className="absolute top-3 right-3 flex items-center gap-0.5 bg-gradient-to-r from-amber-500 to-amber-600 text-white text-[8px] font-extrabold px-2 py-0.5 rounded-full shadow-3xs">
+                          <Star className="h-2 w-2 fill-white" />
+                          <span>作者精选</span>
+                        </div>
+                      )}
+
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          {review.avatar ? (
+                            <img src={review.avatar} alt={review.username} className="h-5 w-5 rounded-full object-cover border border-gray-100" />
+                          ) : (
+                            <div className="h-5 w-5 rounded-full bg-indigo-50 text-indigo-500 flex items-center justify-center text-[10px] font-bold">
+                              {review.username.charAt(0)}
+                            </div>
+                          )}
+                          <div>
+                            <span className="text-xs font-bold text-gray-800 block">{review.username}</span>
+                            <span className="text-[8px] text-gray-400 font-mono block">{new Date(review.createdAt).toLocaleString()}</span>
+                          </div>
+                        </div>
+
+                        <p className="text-xs text-gray-600 leading-relaxed italic pr-6 whitespace-pre-wrap">
+                          “ {review.content} ”
+                        </p>
+                      </div>
+
+                      {/* Author action for Pin / Feature */}
+                      {isPostAuthor && (
+                        <div className="flex justify-end pt-1.5 border-t border-gray-50">
+                          <button
+                            onClick={() => handleToggleFeatureReview(review.id, review.isFeatured)}
+                            className={`px-2 py-1 rounded-lg text-[9px] font-bold transition-all flex items-center gap-1 cursor-pointer border ${
+                              review.isFeatured
+                                ? 'bg-amber-100 text-amber-700 border-amber-200 hover:bg-amber-200'
+                                : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-amber-50 hover:text-amber-600 hover:border-amber-200'
+                            }`}
+                          >
+                            <Star className={`h-3 w-3 ${review.isFeatured ? 'fill-amber-500 text-amber-600' : ''}`} />
+                            <span>{review.isFeatured ? '取消精选' : '推荐至短评墙'}</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Ask Author Section (作者问答区) */}
+        {!isFocusMode && (
+          <div className="mt-12 border-t border-gray-100 pt-8 text-left space-y-6 animate-fade-in" id="ask-author-section">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <div>
+                <h3 className="font-display font-bold text-gray-950 text-sm sm:text-base flex items-center gap-2">
+                  <User className="h-5 w-5 text-emerald-600" />
+                  <span>问作者 Q&A</span>
+                </h3>
+                <p className="text-[10px] text-gray-400 mt-1">对文章设定、CP结局或者连载计划有疑问？在此提问，作者将亲自答复！</p>
+              </div>
+              <span className="text-[10px] bg-emerald-50 text-emerald-700 font-bold px-2.5 py-1 rounded-full font-sans">
+                {authorQuestions.length} 条互动
+              </span>
+            </div>
+
+            {/* Ask Question Form */}
+            {user ? (
+              <form onSubmit={handleAskQuestion} className="bg-gray-50/50 border border-gray-100 rounded-2xl p-4 space-y-3">
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">提问通道</span>
+                  <span className="text-[10px] text-gray-400 font-medium">向 @{post?.authorName} 发起关于设定、番外或剧情的探讨</span>
+                </div>
+                <textarea
+                  value={newQuestion}
+                  onChange={(e) => setNewQuestion(e.target.value.slice(0, 150))}
+                  placeholder="在这里写下您的提问（150字以内）..."
+                  rows={2}
+                  maxLength={150}
+                  className="allow-paste w-full block rounded-xl border border-gray-250 p-3 text-xs text-gray-800 placeholder-gray-400 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+                <div className="flex items-center justify-between text-[10px]">
+                  <span className="text-gray-400 font-medium">当前字数：{newQuestion.length}/150</span>
+                  <button
+                    type="submit"
+                    disabled={!newQuestion.trim() || questionSubmitting}
+                    className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-200 text-white font-bold rounded-xl text-xs transition-all shadow-3xs cursor-pointer flex items-center gap-1"
+                  >
+                    {questionSubmitting ? <Loader2 className="h-3 w-3 animate-spin" /> : <MessageSquare className="h-3.5 w-3.5" />}
+                    <span>发送提问</span>
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div className="text-center py-6 bg-gray-50 border border-dashed border-gray-200 rounded-2xl">
+                <p className="text-xs text-gray-500">请先登录后再进行提问咨询。</p>
+              </div>
+            )}
+
+            {/* Questions List */}
+            {authorQuestions.length === 0 ? (
+              <div className="text-center py-8 text-gray-400 text-xs italic">
+                还没有读者在此发起过提问。留下对主角设定的疑惑吧！
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {authorQuestions.map((qa) => {
+                  const isPostAuthor = user && post && user.firebaseUid === post.authorId;
+                  const isAnsweringThis = answeringQuestionId === qa.id;
+                  
+                  return (
+                    <div key={qa.id} className="bg-white rounded-2xl border border-gray-100 p-4 shadow-3xs space-y-3.5">
+                      {/* Reader's Question */}
+                      <div className="flex items-start gap-3">
+                        <div className="p-2 rounded-xl bg-amber-50 text-amber-600 shrink-0 font-bold font-sans text-xs">
+                          问
+                        </div>
+                        <div className="space-y-1 text-xs">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-gray-800">{qa.username}</span>
+                            <span className="text-[9px] text-gray-400 font-mono">{new Date(qa.createdAt).toLocaleString()}</span>
+                          </div>
+                          <p className="text-gray-700 font-medium">{qa.question}</p>
+                        </div>
+                      </div>
+
+                      {/* Author's Answer */}
+                      {qa.answer ? (
+                        <div className="bg-emerald-50/30 border border-emerald-100/50 rounded-xl p-3.5 flex items-start gap-3 ml-6">
+                          <div className="p-2 rounded-xl bg-emerald-100 text-emerald-700 shrink-0 font-bold font-sans text-xs">
+                            答
+                          </div>
+                          <div className="space-y-1 text-xs text-left">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-bold text-emerald-800">作者官方回复</span>
+                              <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.2 rounded font-semibold font-mono">Official</span>
+                              {qa.answeredAt && (
+                                <span className="text-[9px] text-gray-400 font-mono ml-1">{new Date(qa.answeredAt).toLocaleDateString()}</span>
+                              )}
+                            </div>
+                            <p className="text-gray-600 leading-relaxed font-sans">{qa.answer}</p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="ml-6 flex items-center justify-between">
+                          <span className="text-[10px] text-gray-400 font-medium bg-gray-50 px-2 py-1 rounded-md flex items-center gap-1">
+                            <Loader2 className="h-3 w-3 animate-spin text-indigo-500" />
+                            <span>静待作者亲临答复中...</span>
+                          </span>
+                          
+                          {/* If current user is author, show answering controls */}
+                          {isPostAuthor && !isAnsweringThis && (
+                            <button
+                              onClick={() => {
+                                setAnsweringQuestionId(qa.id);
+                                setNewAnswer('');
+                              }}
+                              className="px-3 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 hover:text-indigo-700 rounded-lg text-[10px] font-bold transition-all border border-indigo-100/30 cursor-pointer"
+                            >
+                              ✍️ 亲笔答复
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Author answering panel */}
+                      {isPostAuthor && isAnsweringThis && (
+                        <div className="ml-6 p-4 bg-indigo-50/30 border border-indigo-100 rounded-xl space-y-3.5">
+                          <textarea
+                            value={newAnswer}
+                            onChange={(e) => setNewAnswer(e.target.value)}
+                            placeholder="请提笔写下您的官方回复..."
+                            rows={2}
+                            className="allow-paste w-full block rounded-xl border border-indigo-200 p-2.5 text-xs text-gray-800 placeholder-gray-400 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                          />
+                          <div className="flex items-center justify-end gap-2 text-[10px]">
+                            <button
+                              onClick={() => setAnsweringQuestionId(null)}
+                              className="px-3 py-1 bg-white hover:bg-gray-50 text-gray-500 rounded-lg font-bold border border-gray-200 transition-all cursor-pointer"
+                            >
+                              取消
+                            </button>
+                            <button
+                              onClick={() => handleAnswerQuestion(qa.id)}
+                              disabled={!newAnswer.trim() || answerSubmitting}
+                              className="px-3.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold transition-all shadow-3xs cursor-pointer"
+                            >
+                              {answerSubmitting ? '发布中...' : '确认发送答复'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 
         {/* Elegant Comments Section */}
-        <div className="mt-12 border-t border-gray-100 pt-8 space-y-6 text-left" id="comments-container">
+        {!isFocusMode && (
+          <div className="mt-12 border-t border-gray-100 pt-8 space-y-6 text-left" id="comments-container">
           <div className="flex items-center justify-between">
             <h3 className="font-display font-bold text-gray-900 text-sm sm:text-base flex items-center gap-2">
               <MessageSquare className="h-4.5 w-4.5 text-indigo-600" />
@@ -1237,6 +1956,7 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
             </div>
           )}
         </div>
+        )}
       </article>
 
       {/* Abuse Report Modal */}
@@ -1419,6 +2139,75 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
               </button>
             </div>
           </div>
+        </div>
+      )}
+      {/* R18 Content Warning Modal */}
+      {showR18Warning && post?.isR18 && !isR18Expanded && (
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in" id="r18-warning-modal">
+          <div className="bg-zinc-950 border border-red-900 rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl space-y-6 text-center text-white">
+            <div className="flex flex-col items-center gap-3">
+              <div className="p-4 bg-red-950/50 border border-red-800 rounded-full text-red-500 animate-pulse">
+                <AlertCircle className="h-10 w-10" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-xl font-extrabold text-red-500 font-display tracking-tight">🔞 限制级敏感内容提示</h3>
+                <p className="text-[10px] text-red-400 font-semibold tracking-wider uppercase font-mono">Restricted Content Warning (R18)</p>
+              </div>
+            </div>
+
+            <p className="text-xs leading-relaxed text-zinc-300">
+              您当前请求阅读的文章 <span className="font-semibold text-red-400">「{post?.title}」</span> 已被作者或管理员标记为包含限制级或敏感不适宜内容（R18）。
+              根据平台准则，您必须年满 <span className="font-bold text-red-500 text-sm">18 周岁</span> 方可继续浏览。
+            </p>
+
+            <div className="p-3 bg-red-950/20 border border-red-950 rounded-xl text-[10px] text-zinc-400 leading-relaxed text-left">
+              ⚠️ 打码说明：在未点击下方“确认年满18岁并继续阅读”前，文章内的所有配图、封面等均保持高度马赛克模糊状态。
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-3 pt-2">
+              <button
+                type="button"
+                onClick={onBack}
+                className="flex-1 py-2.5 px-4 bg-zinc-850 hover:bg-zinc-800 text-zinc-300 font-bold rounded-xl text-xs transition-colors border border-zinc-700 flex items-center justify-center cursor-pointer"
+              >
+                返回
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsR18Expanded(true);
+                  setShowR18Warning(false);
+                }}
+                className="flex-1 py-2.5 px-4 bg-red-600 hover:bg-red-500 text-white font-extrabold rounded-xl text-xs transition-colors flex items-center justify-center gap-1 cursor-pointer shadow-lg shadow-red-900/30 font-display"
+              >
+                我已年满18岁，继续
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Floating control bar during Focus Mode */}
+      {isFocusMode && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 animate-fade-in bg-white/95 backdrop-blur-md border border-gray-150 p-2 rounded-full shadow-lg">
+          <button
+            onClick={() => {
+              onToggleFocusMode?.(false);
+              onBack();
+            }}
+            className="p-2 text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-full transition-all cursor-pointer flex items-center justify-center"
+            title="返回博文列表"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </button>
+          <div className="w-px h-4 bg-gray-200" />
+          <button
+            onClick={() => onToggleFocusMode?.(false)}
+            className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-1.5 rounded-full font-bold text-xs cursor-pointer transition-all hover:scale-102 flex-row shrink-0"
+            title="退出沉浸阅读模式"
+          >
+            <BookOpen className="h-3.5 w-3.5" />
+            <span>退出沉浸</span>
+          </button>
         </div>
       )}
     </div>

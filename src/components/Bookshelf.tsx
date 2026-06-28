@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { collection, query, where, getDocs, onSnapshot, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { AppUser } from '../types';
-import { Bookmark, BookOpen, Trash2, ArrowLeft, Loader2, Heart, Calendar } from 'lucide-react';
+import { Bookmark, BookOpen, Trash2, ArrowLeft, Loader2, Heart, Calendar, Clock, AlertTriangle, X } from 'lucide-react';
 import ImageWrapper from './ImageWrapper';
 
 interface BookshelfProps {
@@ -23,10 +23,29 @@ interface BookmarkItem {
   updatedAt: string;
 }
 
+interface HistoryItem {
+  id: string;
+  postId: string;
+  userId: string;
+  postTitle: string;
+  authorName: string;
+  coverImage: string;
+  progress: number;
+  updatedAt: string;
+}
+
 export default function Bookshelf({ user, onNavigate, onSelectPost }: BookshelfProps) {
   const [bookmarks, setBookmarks] = useState<BookmarkItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'all' | 'want' | 'reading' | 'read'>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'want' | 'reading' | 'read' | 'history'>('all');
+  const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  } | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -55,12 +74,67 @@ export default function Bookshelf({ user, onNavigate, onSelectPost }: BookshelfP
 
   const removeBookmark = async (bookmarkId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!window.confirm("确定要将本文章移出您的书架吗？")) return;
-    try {
-      await deleteDoc(doc(db, 'bookmarks', bookmarkId));
-    } catch (err) {
-      console.error("Failed to remove bookmark:", err);
-    }
+    e.preventDefault();
+    console.log("Initiating bookmark removal for ID:", bookmarkId);
+    setConfirmDialog({
+      isOpen: true,
+      title: '移出书架',
+      message: '确定要将本文章移出您的书架吗？',
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'bookmarks', bookmarkId));
+          console.log("Successfully deleted bookmark:", bookmarkId);
+        } catch (err) {
+          console.error("Failed to remove bookmark:", err);
+        }
+        setConfirmDialog(null);
+      }
+    });
+  };
+
+  useEffect(() => {
+    if (!user) return;
+
+    setHistoryLoading(true);
+    const historyRef = collection(db, 'history');
+    const q = query(historyRef, where('userId', '==', user.firebaseUid));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const items = snapshot.docs.map(docSnap => ({
+        id: docSnap.id,
+        ...docSnap.data()
+      })) as HistoryItem[];
+      
+      // Sort by last updated
+      items.sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
+      setHistoryItems(items);
+      setHistoryLoading(false);
+    }, (error) => {
+      console.error("Error reading reading history:", error);
+      setHistoryLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  const removeHistoryItem = async (historyId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    console.log("Initiating history removal for ID:", historyId);
+    setConfirmDialog({
+      isOpen: true,
+      title: '删除阅读历史',
+      message: '确定要删除这条阅读历史记录吗？',
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'history', historyId));
+          console.log("Successfully deleted history document:", historyId);
+        } catch (err) {
+          console.error("Failed to remove history item:", err);
+        }
+        setConfirmDialog(null);
+      }
+    });
   };
 
   const filteredBookmarks = bookmarks.filter(item => {
@@ -90,10 +164,10 @@ export default function Bookshelf({ user, onNavigate, onSelectPost }: BookshelfP
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-gray-100 mb-6 bg-white p-1 rounded-xl shadow-2xs border">
+      <div className="flex border-b border-gray-100 mb-6 bg-white p-1 rounded-xl shadow-2xs border overflow-x-auto gap-1">
         <button
           onClick={() => setActiveTab('all')}
-          className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+          className={`flex-1 min-w-[70px] py-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
             activeTab === 'all'
               ? 'bg-indigo-600 text-white shadow-sm'
               : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'
@@ -103,7 +177,7 @@ export default function Bookshelf({ user, onNavigate, onSelectPost }: BookshelfP
         </button>
         <button
           onClick={() => setActiveTab('want')}
-          className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+          className={`flex-1 min-w-[50px] py-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
             activeTab === 'want'
               ? 'bg-indigo-600 text-white shadow-sm'
               : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'
@@ -113,7 +187,7 @@ export default function Bookshelf({ user, onNavigate, onSelectPost }: BookshelfP
         </button>
         <button
           onClick={() => setActiveTab('reading')}
-          className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+          className={`flex-1 min-w-[50px] py-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
             activeTab === 'reading'
               ? 'bg-indigo-600 text-white shadow-sm'
               : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'
@@ -123,7 +197,7 @@ export default function Bookshelf({ user, onNavigate, onSelectPost }: BookshelfP
         </button>
         <button
           onClick={() => setActiveTab('read')}
-          className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+          className={`flex-1 min-w-[50px] py-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
             activeTab === 'read'
               ? 'bg-indigo-600 text-white shadow-sm'
               : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'
@@ -131,10 +205,106 @@ export default function Bookshelf({ user, onNavigate, onSelectPost }: BookshelfP
         >
           已读 ({bookmarks.filter(b => b.status === 'read').length})
         </button>
+        <button
+          onClick={() => setActiveTab('history')}
+          className={`flex-1 min-w-[80px] py-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1 ${
+            activeTab === 'history'
+              ? 'bg-indigo-600 text-white shadow-sm'
+              : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'
+          }`}
+        >
+          <Clock className="h-3.5 w-3.5 shrink-0" />
+          <span>阅读历史 ({historyItems.length})</span>
+        </button>
       </div>
 
       {/* Content */}
-      {loading ? (
+      {activeTab === 'history' ? (
+        historyLoading ? (
+          <div className="flex flex-col items-center justify-center py-24 bg-white border border-gray-100 rounded-2xl shadow-3xs">
+            <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
+            <span className="text-gray-500 text-xs mt-3 font-semibold">正在调阅浏览足迹...</span>
+          </div>
+        ) : historyItems.length === 0 ? (
+          <div className="text-center py-16 bg-white rounded-2xl border border-gray-100 shadow-sm">
+            <Clock className="h-10 w-10 text-gray-300 mx-auto mb-3 animate-pulse" />
+            <h3 className="text-sm font-bold text-gray-800 font-display">暂无阅读历史</h3>
+            <p className="text-xs text-gray-400 mt-2 max-w-sm mx-auto leading-relaxed">
+              您最近还没有浏览过任何博文。在大厅里点开几篇文章阅读，它们就会自动记录在这里，方便您随时继续阅读。
+            </p>
+            <button
+              onClick={() => onNavigate('home')}
+              className="mt-5 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition-all shadow-sm cursor-pointer"
+            >
+              去浏览博文
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 text-left">
+            {historyItems.map((item) => {
+              const scrollProgress = item.progress || 0;
+              return (
+                <div
+                  key={item.id}
+                  onClick={() => onSelectPost(item.postId)}
+                  className="group bg-white rounded-2xl border border-gray-100 p-4 shadow-3xs hover:shadow-2xs transition-all duration-300 flex flex-col justify-between cursor-pointer relative overflow-hidden"
+                >
+                  <div className="space-y-3.5">
+                    <div className="aspect-video rounded-xl overflow-hidden border border-gray-100 bg-gray-50 relative shrink-0">
+                      <ImageWrapper
+                        src={item.coverImage}
+                        alt={item.postTitle}
+                        width={400}
+                        className="w-full h-full object-cover transition-transform group-hover:scale-102"
+                        placeholderClassName="w-full h-full"
+                      />
+                      <span className="absolute top-2 left-2 text-[9px] font-bold px-2 py-0.5 rounded-full shadow-2xs text-white bg-zinc-700/90 backdrop-blur-xs flex items-center gap-1">
+                        <Clock className="h-2.5 w-2.5" />
+                        <span>阅读足迹</span>
+                      </span>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <h3 className="font-bold text-gray-900 line-clamp-1 group-hover:text-indigo-600 transition-colors text-sm font-display">
+                        {item.postTitle}
+                      </h3>
+                      <div className="flex items-center justify-between text-[10px] text-gray-400">
+                        <span>作者：{item.authorName}</span>
+                        <span className="font-mono">{new Date(item.updatedAt).toLocaleDateString()} 访问</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 pt-3.5 border-t border-gray-50 space-y-2">
+                    <div className="flex items-center justify-between text-[9px] font-bold text-gray-500">
+                      <span>上次读到</span>
+                      <span className="font-mono text-indigo-600">{Math.round(scrollProgress)}%</span>
+                    </div>
+
+                    {/* Progress track */}
+                    <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-indigo-500 to-indigo-600 rounded-full transition-all duration-500"
+                        style={{ width: `${scrollProgress}%` }}
+                      />
+                    </div>
+
+                    <div className="flex justify-end pt-1.5">
+                      <button
+                        onClick={(e) => removeHistoryItem(item.id, e)}
+                        title="删除此条浏览记录"
+                        className="p-1.5 text-gray-400 hover:text-rose-600 rounded hover:bg-rose-50 transition-colors cursor-pointer"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )
+      ) : loading ? (
         <div className="flex flex-col items-center justify-center py-24 bg-white border border-gray-100 rounded-2xl shadow-3xs">
           <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
           <span className="text-gray-500 text-xs mt-3 font-semibold">正在整理私人书库...</span>
@@ -220,6 +390,53 @@ export default function Bookshelf({ user, onNavigate, onSelectPost }: BookshelfP
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Custom Confirm Dialog Modal */}
+      {confirmDialog?.isOpen && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in" id="bookshelf-confirm-modal">
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-2xl max-w-sm w-full p-6 border border-gray-100 shadow-xl space-y-4 animate-scale-in text-left"
+          >
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-amber-50 text-amber-500 shrink-0">
+                  <AlertTriangle className="h-5 w-5" />
+                </div>
+                <h3 className="font-display font-bold text-gray-900 text-sm">{confirmDialog.title}</h3>
+              </div>
+              <button 
+                onClick={() => setConfirmDialog(null)}
+                className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-50 transition-colors cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            
+            <p className="text-xs text-gray-500 leading-relaxed">
+              {confirmDialog.message}
+            </p>
+            
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                onClick={() => setConfirmDialog(null)}
+                className="px-3.5 py-1.5 rounded-xl border border-gray-200 text-gray-500 hover:text-gray-700 hover:bg-gray-50 text-xs font-bold transition-all cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => {
+                  confirmDialog.onConfirm();
+                }}
+                className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center gap-1"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                <span>确认</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

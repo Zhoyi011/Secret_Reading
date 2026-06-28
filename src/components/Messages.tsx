@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { collection, query, where, getDocs, addDoc, onSnapshot, orderBy, doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { AppUser } from '../types';
-import { ArrowLeft, Loader2, Send, MessageSquare, User as UserIcon, CheckCircle2, ShieldAlert } from 'lucide-react';
+import { ArrowLeft, Loader2, Send, MessageSquare, User as UserIcon, CheckCircle2, ShieldAlert, BellOff } from 'lucide-react';
 
 interface MessagesProps {
   user: AppUser | null;
@@ -21,6 +21,7 @@ interface Message {
   body: string;
   createdAt: string;
   read: boolean;
+  isSilent?: boolean;
 }
 
 interface ChatThread {
@@ -40,6 +41,7 @@ export default function Messages({ user, onNavigate, recipientId }: MessagesProp
   const [activeThreadUser, setActiveThreadUser] = useState<{ id: string; name: string; avatar: string } | null>(null);
   const [text, setText] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [isSilent, setIsSilent] = useState(false);
   const [availableUsers, setAvailableUsers] = useState<AppUser[]>([]);
   const [showNewChatDropdown, setShowNewChatDropdown] = useState(false);
   const [newChatSearch, setNewChatSearch] = useState('');
@@ -210,9 +212,14 @@ export default function Messages({ user, onNavigate, recipientId }: MessagesProp
     e.preventDefault();
     if (!user || !activeThreadUser || !text.trim() || isSending) return;
 
+    if (user.isMuted) {
+      alert("您已被管理员禁言，无法发送私人来信。如有疑问请联系客服/站长。");
+      return;
+    }
+
     setIsSending(true);
     try {
-      const payload = {
+      const payload: any = {
         senderId: user.firebaseUid,
         senderName: user.username,
         senderAvatar: user.avatar || '',
@@ -221,26 +228,32 @@ export default function Messages({ user, onNavigate, recipientId }: MessagesProp
         recipientAvatar: activeThreadUser.avatar,
         body: text.trim(),
         createdAt: new Date().toISOString(),
-        read: false
+        read: false,
+        isSilent: isSilent
       };
 
       await addDoc(collection(db, 'messages'), payload);
       setText('');
       
-      // Also write secondary push notification to receiver
-      try {
-        await addDoc(collection(db, 'notifications'), {
-          recipientId: activeThreadUser.id,
-          senderId: user.firebaseUid,
-          senderName: user.username,
-          senderAvatar: user.avatar || '',
-          type: 'private_message',
-          title: '收到新的私人来信',
-          body: `用户「${user.username}」给您发了一条私信: "${payload.body.slice(0, 30)}..."`,
-          read: false,
-          createdAt: new Date().toISOString()
-        });
-      } catch (_) {}
+      // If it's a silent/temporary message, do NOT create a document in notifications collection
+      if (!isSilent) {
+        try {
+          await addDoc(collection(db, 'notifications'), {
+            recipientId: activeThreadUser.id,
+            senderId: user.firebaseUid,
+            senderName: user.username,
+            senderAvatar: user.avatar || '',
+            type: 'private_message',
+            title: '收到新的私人来信',
+            body: `用户「${user.username}」给您发了一条私信: "${payload.body.slice(0, 30)}..."`,
+            read: false,
+            createdAt: new Date().toISOString()
+          });
+        } catch (_) {}
+      } else {
+        // Reset the silent checkbox after a silent message is successfully sent
+        setIsSilent(false);
+      }
 
     } catch (err) {
       console.error("Failed to send message:", err);
@@ -463,15 +476,23 @@ export default function Messages({ user, onNavigate, recipientId }: MessagesProp
                           className="h-7 w-7 rounded-full object-cover border border-gray-100 shrink-0"
                         />
                         <div className="space-y-1">
-                          <div className={`p-3 rounded-2xl text-xs font-semibold leading-relaxed break-words shadow-3xs ${
+                          <div className={`p-3 rounded-2xl text-xs font-semibold leading-relaxed break-words shadow-3xs relative ${
                             isMyMsg
                               ? 'bg-indigo-600 text-white rounded-tr-none'
                               : 'bg-white text-gray-800 border border-gray-100 rounded-tl-none'
                           }`}>
                             {msg.body}
+
+                            {/* Silent message indicator */}
+                            {msg.isSilent && (
+                              <span className="absolute -top-1.5 -right-1.5 bg-gray-100 text-gray-500 rounded-full p-0.5 border border-gray-200 text-[8px] flex items-center justify-center scale-90" title="临时/静音消息（无系统提醒）">
+                                <BellOff className="h-2 w-2" />
+                              </span>
+                            )}
                           </div>
-                          <span className={`block text-[8px] text-gray-400 font-mono font-medium ${isMyMsg ? 'text-right' : 'text-left'}`}>
-                            {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          <span className={`block text-[8px] text-gray-400 font-mono font-medium flex items-center gap-1 ${isMyMsg ? 'justify-end text-right' : 'justify-start text-left'}`}>
+                            {msg.isSilent && <span className="text-[8px] text-zinc-400 flex items-center gap-0.5"><BellOff className="h-2 w-2" /> 临时</span>}
+                            <span>{new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                           </span>
                         </div>
                       </div>
@@ -482,23 +503,39 @@ export default function Messages({ user, onNavigate, recipientId }: MessagesProp
               </div>
 
               {/* Chat Input panel */}
-              <form onSubmit={handleSendMessage} className="p-3.5 border-t border-gray-100 bg-white flex items-center gap-2">
-                <input
-                  type="text"
-                  required
-                  placeholder={`写一封回信给 ${activeThreadUser.name}...`}
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  className="allow-paste flex-1 bg-gray-50 border border-gray-200 rounded-xl py-2 px-3.5 text-xs text-gray-850 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                />
-                <button
-                  type="submit"
-                  disabled={isSending || !text.trim()}
-                  className="p-2.5 bg-indigo-600 text-white hover:bg-indigo-550 rounded-xl transition-all shadow-sm active:scale-95 disabled:opacity-50 cursor-pointer shrink-0"
-                >
-                  {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                </button>
-              </form>
+              <div className="border-t border-gray-100 bg-white p-3.5 space-y-2 flex flex-col">
+                <form onSubmit={handleSendMessage} className="flex items-center gap-2 w-full">
+                  <input
+                    type="text"
+                    required
+                    placeholder={`写一封回信给 ${activeThreadUser.name}...`}
+                    value={text}
+                    onChange={(e) => setText(e.target.value)}
+                    className="allow-paste flex-1 bg-gray-50 border border-gray-200 rounded-xl py-2 px-3.5 text-xs text-gray-850 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isSending || !text.trim()}
+                    className="p-2.5 bg-indigo-600 text-white hover:bg-indigo-550 rounded-xl transition-all shadow-sm active:scale-95 disabled:opacity-50 cursor-pointer shrink-0"
+                  >
+                    {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                  </button>
+                </form>
+                <div className="flex items-center gap-1.5 px-1">
+                  <label className="flex items-center gap-1.5 cursor-pointer text-[10px] text-gray-400 select-none hover:text-indigo-600 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={isSilent}
+                      onChange={(e) => setIsSilent(e.target.checked)}
+                      className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 h-3 w-3 cursor-pointer"
+                    />
+                    <span className="flex items-center gap-1">
+                      <BellOff className="h-3 w-3 text-gray-400" />
+                      发送临时消息（静音无平台通知/弹窗，常用于日常高频闲聊，保护对方免受大量粉丝私信通知轰炸）
+                    </span>
+                  </label>
+                </div>
+              </div>
             </>
           ) : (
             <div className="h-full flex flex-col items-center justify-center p-8 text-center text-gray-400">

@@ -237,6 +237,82 @@
         "active": { "type": "boolean", "description": "Whether the announcement is currently visible" }
       },
       "required": ["title", "content", "createdAt", "active"]
+    },
+    "ShortReview": {
+      "title": "Reader Short Review",
+      "description": "Short review / reader thoughts for a specific chapter",
+      "type": "object",
+      "properties": {
+        "postId": { "type": "string" },
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "avatar": { "type": "string" },
+        "content": { "type": "string" },
+        "isFeatured": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["postId", "userId", "username", "content", "isFeatured", "createdAt"]
+    },
+    "AuthorQuestion": {
+      "title": "Author Question Q&A",
+      "description": "Reader question and author answer on a specific chapter",
+      "type": "object",
+      "properties": {
+        "postId": { "type": "string" },
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "avatar": { "type": "string" },
+        "question": { "type": "string" },
+        "answer": { "type": "string" },
+        "answeredAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["postId", "userId", "username", "question", "createdAt"]
+    },
+    "StoryBounty": {
+      "title": "Story Bounty Request",
+      "description": "Reader posted story bounty/request for authors to claim",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "avatar": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "rewardAmount": { "type": "integer" },
+        "status": { "type": "string", "enum": ["open", "claimed", "closed"] },
+        "claims": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "username", "title", "description", "rewardAmount", "status", "createdAt"]
+    },
+    "CPVoteTheme": {
+      "title": "Monthly CP Vote Theme",
+      "description": "Monthly themed character pairing poll",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "candidates": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "description", "isActive", "candidates", "createdAt"]
+    },
+    "UserStreak": {
+      "title": "User Reading Streak",
+      "description": "User consecutive daily reading check-ins",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "streakCount": { "type": "integer" },
+        "lastCheckedIn": { "type": "string" },
+        "history": { "type": "array" },
+        "badges": { "type": "array" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "username", "streakCount", "lastCheckedIn", "history", "badges", "updatedAt"]
     }
   },
   "firestore": {
@@ -283,6 +359,26 @@
     "announcements/{announcementId}": {
       "schema": "Announcement",
       "description": "Global system announcements displayed on homepage"
+    },
+    "short_reviews/{reviewId}": {
+      "schema": "ShortReview",
+      "description": "Reader short reviews/thoughts"
+    },
+    "questions/{questionId}": {
+      "schema": "AuthorQuestion",
+      "description": "Author QA sessions"
+    },
+    "story_bounties/{bountyId}": {
+      "schema": "StoryBounty",
+      "description": "Story bounties/requests"
+    },
+    "cp_polls/{pollId}": {
+      "schema": "CPVoteTheme",
+      "description": "CP pairing themed vote themes"
+    },
+    "user_streaks/{streakId}": {
+      "schema": "UserStreak",
+      "description": "User reading streaks"
     }
   }
 }
