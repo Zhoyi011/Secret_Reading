@@ -15,6 +15,7 @@ export default function Settings({ user, onBack }: SettingsProps) {
   const [username, setUsername] = useState('');
   const [avatar, setAvatar] = useState('');
   const [filterR18, setFilterR18] = useState(true);
+  const [updatePlan, setUpdatePlan] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -26,6 +27,7 @@ export default function Settings({ user, onBack }: SettingsProps) {
       setUsername(user.username || '');
       setAvatar(user.avatar || '');
       setFilterR18(user.filterR18 !== false);
+      setUpdatePlan(user.updatePlan || '');
       const existingMongo = mongoClient.findUserById(user.firebaseUid);
       if (existingMongo) {
         setMongoDoc(existingMongo);
@@ -52,6 +54,7 @@ export default function Settings({ user, onBack }: SettingsProps) {
         username: username.trim(),
         avatar: avatar.trim(),
         filterR18: filterR18,
+        updatePlan: updatePlan.trim(),
       };
 
       await updateDoc(userRef, updatePayload);
@@ -166,6 +169,27 @@ export default function Settings({ user, onBack }: SettingsProps) {
               className="block w-full rounded-xl border border-gray-200 py-2.5 px-3.5 text-xs text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 shadow-2xs transition-all"
             />
           </div>
+
+          {/* Author/Owner's Update Plan / Card settings */}
+          {(user.role === 'owner' || user.role === 'author') && (
+            <div className="space-y-1.5 p-4 rounded-2xl bg-indigo-50/20 border border-indigo-100/50 animate-fade-in text-left">
+              <label className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+                <Calendar className="h-4 w-4 text-indigo-650" />
+                <span>创作者连载声明 / 个人名录说明</span>
+              </label>
+              <textarea
+                value={updatePlan}
+                onChange={(e) => setUpdatePlan(e.target.value)}
+                placeholder="例如：每周双更，周三与周六晚八点见！或者输入您想对读者说的简介，会直接展现在您的「精美创作者卡片」与「创作者名录」中。"
+                maxLength={120}
+                rows={2}
+                className="block w-full rounded-xl border border-gray-200 py-2 px-3 text-xs text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 bg-white shadow-2xs transition-all resize-none"
+              />
+              <span className="block text-[9px] text-indigo-400 font-medium">
+                此设置会同步应用到您的精美卡片背景、平台名录、以及全网的创作者展示区。
+              </span>
+            </div>
+          )}
 
           {/* R18 Content Filtering Toggle */}
           <div className="bg-gray-50/55 p-4 rounded-2xl border border-gray-100/80 flex items-center justify-between gap-4">
