@@ -246,30 +246,30 @@ export default function AuthorProfile({ authorId, user, onNavigate, onSelectPost
         const isAuthor = author.role === 'author';
         const authorLevel = author.level || 'normal';
 
-        let cardClass = "bg-white rounded-3xl border border-gray-100 p-6 sm:p-10 shadow-sm flex flex-col md:flex-row items-center gap-6 sm:gap-8 relative overflow-hidden w-full text-left";
+        let cardClass = "bg-white rounded-3xl border border-gray-100 p-6 sm:p-8 md:p-10 shadow-sm flex flex-col md:flex-row items-center gap-6 sm:gap-8 md:gap-10 relative overflow-hidden w-full text-left";
         let nameClass = "font-display font-bold text-gray-900 text-2xl sm:text-3xl leading-none";
         let textClass = "text-gray-500 text-xs sm:text-sm font-medium flex items-center justify-center md:justify-start gap-1";
         let metaClass = "text-gray-400 text-xs flex items-center justify-center md:justify-start gap-3";
         let ringClass = "h-24 w-24 sm:h-28 sm:w-28 rounded-full object-cover border-4 border-indigo-50 shadow-md shrink-0 ring-4 ring-indigo-50";
-        let statsClass = "grid grid-cols-2 divide-x divide-gray-100 bg-gray-50/50 rounded-2xl border border-gray-100 p-3 text-center";
+        let statsClass = "grid grid-cols-2 divide-x divide-gray-100 bg-gray-50/50 rounded-2xl border border-gray-100 p-4 sm:p-5 text-center";
         let statsNumClass = "block font-display text-base font-bold text-gray-900";
         let statsLabelClass = "text-[10px] text-gray-500";
-        let buttonFollowClass = "flex items-center gap-1 text-gray-600 bg-gray-50 hover:bg-gray-100 border border-gray-100 px-3 py-1 rounded-lg transition-colors cursor-pointer";
+        let buttonFollowClass = "flex items-center gap-1.5 text-gray-600 bg-gray-50 hover:bg-gray-100 border border-gray-100 px-3 py-1.5 rounded-lg transition-colors cursor-pointer";
         let buttonFollowSpanClass = "text-indigo-600 font-bold font-display";
         let levelBadge = null;
         let sparklesElement = null;
         let bioBanner = null;
 
         if (isOwner) {
-          cardClass = "bg-gradient-to-br from-zinc-950 via-purple-950/90 to-zinc-900 rounded-3xl border-2 border-purple-550/80 p-6 sm:p-10 shadow-[0_20px_50px_rgba(168,85,247,0.25)] flex flex-col md:flex-row items-center gap-6 sm:gap-8 relative overflow-hidden w-full text-white text-left";
+          cardClass = "bg-gradient-to-br from-zinc-950 via-purple-950/90 to-zinc-900 rounded-3xl border-2 border-purple-550/80 p-6 sm:p-8 md:p-10 shadow-[0_20px_50px_rgba(168,85,247,0.25)] flex flex-col md:flex-row items-center gap-6 sm:gap-8 md:gap-10 relative overflow-hidden w-full text-white text-left";
           nameClass = "font-display font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-pink-400 to-indigo-300 text-2xl sm:text-3xl leading-none tracking-tight";
           textClass = "text-purple-200/80 text-xs sm:text-sm font-medium flex items-center justify-center md:justify-start gap-1";
           metaClass = "text-purple-300/65 text-xs flex items-center justify-center md:justify-start gap-3";
           ringClass = "h-24 w-24 sm:h-28 sm:w-28 rounded-full object-cover border-4 border-purple-500/30 shadow-md shrink-0 ring-4 ring-purple-500 ring-offset-2 ring-offset-zinc-950";
-          statsClass = "grid grid-cols-2 divide-x divide-purple-500/10 bg-zinc-900/85 rounded-2xl border border-purple-550/20 p-3 text-center";
+          statsClass = "grid grid-cols-2 divide-x divide-purple-500/10 bg-zinc-900/85 rounded-2xl border border-purple-550/20 p-4 sm:p-5 text-center";
           statsNumClass = "block font-display text-base font-extrabold text-purple-300";
           statsLabelClass = "text-[10px] text-purple-200/60";
-          buttonFollowClass = "flex items-center gap-1 text-purple-200 bg-purple-900/40 hover:bg-purple-900/65 border border-purple-800/50 px-3 py-1 rounded-lg transition-colors cursor-pointer";
+          buttonFollowClass = "flex items-center gap-1.5 text-purple-200 bg-purple-900/40 hover:bg-purple-900/65 border border-purple-800/50 px-3 py-1.5 rounded-lg transition-colors cursor-pointer";
           buttonFollowSpanClass = "text-purple-300 font-bold font-display";
           levelBadge = (
             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-600 text-white shadow-xs">
@@ -289,12 +289,12 @@ export default function AuthorProfile({ authorId, user, onNavigate, onSelectPost
           );
         } else if (isAuthor) {
           if (authorLevel === 'vip') {
-            cardClass = "bg-gradient-to-br from-amber-100/45 via-white to-orange-50/35 rounded-3xl border-2 border-amber-300 p-6 sm:p-10 shadow-[0_15px_35px_rgba(245,158,11,0.12)] flex flex-col md:flex-row items-center gap-6 sm:gap-8 relative overflow-hidden w-full text-left";
+            cardClass = "bg-gradient-to-br from-amber-100/45 via-white to-orange-50/35 rounded-3xl border-2 border-amber-300 p-6 sm:p-8 md:p-10 shadow-[0_15px_35px_rgba(245,158,11,0.12)] flex flex-col md:flex-row items-center gap-6 sm:gap-8 md:gap-10 relative overflow-hidden w-full text-left";
             nameClass = "font-display font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-550 via-amber-700 to-rose-600 text-2xl sm:text-3xl leading-none tracking-tight";
             textClass = "text-amber-850/90 text-xs sm:text-sm font-medium flex items-center justify-center md:justify-start gap-1";
             metaClass = "text-amber-600/70 text-xs flex items-center justify-center md:justify-start gap-3";
             ringClass = "h-24 w-24 sm:h-28 sm:w-28 rounded-full object-cover border-4 border-white shadow-md shrink-0 ring-4 ring-amber-400 ring-offset-2 ring-offset-amber-50 animate-pulse";
-            statsClass = "grid grid-cols-2 divide-x divide-amber-200/40 bg-gradient-to-br from-amber-50/70 to-orange-50/40 rounded-2xl border border-amber-100 p-3 text-center shadow-2xs";
+            statsClass = "grid grid-cols-2 divide-x divide-amber-200/40 bg-gradient-to-br from-amber-50/70 to-orange-50/40 rounded-2xl border border-amber-100 p-4 sm:p-5 text-center shadow-2xs";
             statsNumClass = "block font-display text-base font-black text-amber-800";
             statsLabelClass = "text-[10px] text-amber-600/80";
             levelBadge = (
@@ -315,12 +315,12 @@ export default function AuthorProfile({ authorId, user, onNavigate, onSelectPost
               </>
             );
           } else if (authorLevel === 'signed') {
-            cardClass = "bg-gradient-to-br from-emerald-50/60 via-white to-emerald-50/10 rounded-3xl border-2 border-emerald-250 p-6 sm:p-10 shadow-[0_8px_30px_rgba(16,185,129,0.06)] flex flex-col md:flex-row items-center gap-6 sm:gap-8 relative overflow-hidden w-full text-left";
+            cardClass = "bg-gradient-to-br from-emerald-50/60 via-white to-emerald-50/10 rounded-3xl border-2 border-emerald-250 p-6 sm:p-8 md:p-10 shadow-[0_8px_30px_rgba(16,185,129,0.06)] flex flex-col md:flex-row items-center gap-6 sm:gap-8 md:gap-10 relative overflow-hidden w-full text-left";
             nameClass = "font-display font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-emerald-600 via-teal-700 to-emerald-950 text-2xl sm:text-3xl leading-none";
             textClass = "text-emerald-800/80 text-xs sm:text-sm font-medium flex items-center justify-center md:justify-start gap-1";
             metaClass = "text-emerald-600/60 text-xs flex items-center justify-center md:justify-start gap-3";
             ringClass = "h-24 w-24 sm:h-28 sm:w-28 rounded-full object-cover border-4 border-white shadow-md shrink-0 ring-4 ring-emerald-300";
-            statsClass = "grid grid-cols-2 divide-x divide-emerald-100 bg-emerald-50/40 rounded-2xl border border-emerald-100/60 p-3 text-center";
+            statsClass = "grid grid-cols-2 divide-x divide-emerald-100 bg-emerald-50/40 rounded-2xl border border-emerald-100/60 p-4 sm:p-5 text-center";
             statsNumClass = "block font-display text-base font-bold text-emerald-800";
             statsLabelClass = "text-[10px] text-emerald-600";
             levelBadge = (
@@ -337,12 +337,12 @@ export default function AuthorProfile({ authorId, user, onNavigate, onSelectPost
               <div className="absolute top-0 right-0 h-40 w-40 bg-gradient-to-br from-emerald-100/30 to-transparent rounded-full -mr-16 -mt-16 pointer-events-none"></div>
             );
           } else {
-            cardClass = "bg-gradient-to-br from-indigo-50/50 via-white to-sky-50/30 rounded-3xl border border-indigo-100/80 p-6 sm:p-10 shadow-[0_4px_20px_rgba(99,102,241,0.02)] flex flex-col md:flex-row items-center gap-6 sm:gap-8 relative overflow-hidden w-full text-left";
+            cardClass = "bg-gradient-to-br from-indigo-50/50 via-white to-sky-50/30 rounded-3xl border border-indigo-100/80 p-6 sm:p-8 md:p-10 shadow-[0_4px_20px_rgba(99,102,241,0.02)] flex flex-col md:flex-row items-center gap-6 sm:gap-8 md:gap-10 relative overflow-hidden w-full text-left";
             nameClass = "font-display font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-sky-850 text-2xl sm:text-3xl leading-none";
             textClass = "text-indigo-800/70 text-xs sm:text-sm font-medium flex items-center justify-center md:justify-start gap-1";
             metaClass = "text-indigo-400 text-xs flex items-center justify-center md:justify-start gap-3";
             ringClass = "h-24 w-24 sm:h-28 sm:w-28 rounded-full object-cover border-4 border-white shadow-md shrink-0 ring-4 ring-indigo-150";
-            statsClass = "grid grid-cols-2 divide-x divide-indigo-100 bg-indigo-50/20 rounded-2xl border border-indigo-100/40 p-3 text-center";
+            statsClass = "grid grid-cols-2 divide-x divide-indigo-100 bg-indigo-50/20 rounded-2xl border border-indigo-100/40 p-4 sm:p-5 text-center";
             statsNumClass = "block font-display text-base font-bold text-indigo-700";
             statsLabelClass = "text-[10px] text-indigo-500";
             levelBadge = (
@@ -495,7 +495,7 @@ export default function AuthorProfile({ authorId, user, onNavigate, onSelectPost
                 <div
                   key={post.id}
                   onClick={() => onSelectPost(post.id)}
-                  className="group bg-white rounded-2xl border border-gray-100 p-4 shadow-3xs hover:shadow-2xs hover:border-gray-200 transition-all duration-300 flex flex-col justify-between cursor-pointer"
+                  className="group bg-white rounded-2xl border border-gray-100 p-5 sm:p-6 shadow-3xs hover:shadow-2xs hover:border-gray-200 transition-all duration-300 flex flex-col justify-between cursor-pointer"
                 >
                   <div className="space-y-3.5">
                     <div className="aspect-video rounded-xl overflow-hidden border border-gray-100 bg-gray-50 relative shrink-0">

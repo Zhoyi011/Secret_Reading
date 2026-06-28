@@ -114,7 +114,7 @@ export default function AuthorDirectory({ currentUser, onSelectAuthor }: AuthorD
           </div>
 
           {/* Level Filter Dropdown/Tabs */}
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-row md:flex-wrap gap-2 overflow-x-auto scrollbar-none pb-1 md:pb-0 shrink-0 w-full md:w-auto -mx-4 px-4 md:mx-0 md:px-0">
             {(Object.keys(counts) as Array<keyof typeof counts>).map((level) => {
               const labelMap: Record<LevelFilter, string> = {
                 all: '全部创作者',
@@ -160,20 +160,20 @@ export default function AuthorDirectory({ currentUser, onSelectAuthor }: AuthorD
           <p className="text-xs text-gray-450">试试搜索其他的关键字或切换分类标签吧！</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8 lg:gap-10">
           {filteredAuthors.map((author) => {
             const isOwner = author.role === 'owner';
             const authorLevel = author.level || 'normal';
 
-            // Distinct visual classes matching profile card styling rules
-            let cardClass = "bg-white rounded-2xl border border-gray-150 p-5 shadow-3xs flex flex-col justify-between relative overflow-hidden transition-all hover:translate-y-[-2px] hover:shadow-2xs";
+            // Distinct visual classes matching profile card styling rules - expanded padding for breathing room
+            let cardClass = "bg-white rounded-2xl border border-gray-150 p-6 sm:p-7 shadow-3xs flex flex-col justify-between relative overflow-hidden transition-all hover:translate-y-[-2px] hover:shadow-2xs";
             let nameClass = "font-display font-bold text-gray-900 text-base leading-snug line-clamp-1";
             let ringClass = "h-14 w-14 rounded-full object-cover border-2 border-indigo-50 shadow-xs ring-2 ring-indigo-50 shrink-0";
             let roleBadge = null;
             let sparklesElement = null;
 
             if (isOwner) {
-              cardClass = "bg-gradient-to-br from-zinc-950 via-purple-950/95 to-zinc-900 rounded-2xl border border-purple-550/80 p-5 shadow-[0_12px_24px_rgba(168,85,247,0.18)] flex flex-col justify-between relative overflow-hidden text-white transition-all hover:translate-y-[-2px]";
+              cardClass = "bg-gradient-to-br from-zinc-950 via-purple-950/95 to-zinc-900 rounded-2xl border border-purple-550/80 p-6 sm:p-7 shadow-[0_12px_24px_rgba(168,85,247,0.18)] flex flex-col justify-between relative overflow-hidden text-white transition-all hover:translate-y-[-2px]";
               nameClass = "font-display font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-300 to-pink-300 text-base leading-snug line-clamp-1";
               ringClass = "h-14 w-14 rounded-full object-cover border-2 border-purple-500/20 shadow-xs ring-2 ring-purple-500 shrink-0";
               roleBadge = (
@@ -186,7 +186,7 @@ export default function AuthorDirectory({ currentUser, onSelectAuthor }: AuthorD
               );
             } else if (author.role === 'author') {
               if (authorLevel === 'vip') {
-                cardClass = "bg-gradient-to-br from-amber-50/40 via-white to-orange-50/20 rounded-2xl border-2 border-amber-300 p-5 shadow-[0_10px_20px_rgba(245,158,11,0.06)] flex flex-col justify-between relative overflow-hidden transition-all hover:translate-y-[-2px] hover:shadow-2xs";
+                cardClass = "bg-gradient-to-br from-amber-50/40 via-white to-orange-50/20 rounded-2xl border-2 border-amber-300 p-6 sm:p-7 shadow-[0_10px_20px_rgba(245,158,11,0.06)] flex flex-col justify-between relative overflow-hidden transition-all hover:translate-y-[-2px] hover:shadow-2xs";
                 nameClass = "font-display font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-600 to-rose-650 text-base leading-snug line-clamp-1";
                 ringClass = "h-14 w-14 rounded-full object-cover border-2 border-white shadow-xs ring-2 ring-amber-400 shrink-0";
                 roleBadge = (
@@ -198,7 +198,7 @@ export default function AuthorDirectory({ currentUser, onSelectAuthor }: AuthorD
                   <Sparkles className="absolute h-4 w-4 text-amber-500/35 top-3 right-3 animate-pulse pointer-events-none" />
                 );
               } else if (authorLevel === 'signed') {
-                cardClass = "bg-gradient-to-br from-emerald-50/40 via-white to-emerald-50/5 rounded-2xl border-2 border-emerald-250 p-5 shadow-3xs flex flex-col justify-between relative overflow-hidden transition-all hover:translate-y-[-2px] hover:shadow-2xs";
+                cardClass = "bg-gradient-to-br from-emerald-50/40 via-white to-emerald-50/5 rounded-2xl border-2 border-emerald-250 p-6 sm:p-7 shadow-3xs flex flex-col justify-between relative overflow-hidden transition-all hover:translate-y-[-2px] hover:shadow-2xs";
                 nameClass = "font-display font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-emerald-600 to-emerald-950 text-base leading-snug line-clamp-1";
                 ringClass = "h-14 w-14 rounded-full object-cover border-2 border-white shadow-xs ring-2 ring-emerald-300 shrink-0";
                 roleBadge = (
@@ -207,7 +207,7 @@ export default function AuthorDirectory({ currentUser, onSelectAuthor }: AuthorD
                   </span>
                 );
               } else {
-                cardClass = "bg-gradient-to-br from-indigo-50/40 via-white to-indigo-50/5 rounded-2xl border border-indigo-150 p-5 shadow-3xs flex flex-col justify-between relative overflow-hidden transition-all hover:translate-y-[-2px] hover:shadow-2xs";
+                cardClass = "bg-gradient-to-br from-indigo-50/40 via-white to-indigo-50/5 rounded-2xl border border-indigo-150 p-6 sm:p-7 shadow-3xs flex flex-col justify-between relative overflow-hidden transition-all hover:translate-y-[-2px] hover:shadow-2xs";
                 nameClass = "font-display font-bold text-indigo-900 text-base leading-snug line-clamp-1";
                 ringClass = "h-14 w-14 rounded-full object-cover border-2 border-white shadow-xs ring-2 ring-indigo-200 shrink-0";
                 roleBadge = (
@@ -223,14 +223,14 @@ export default function AuthorDirectory({ currentUser, onSelectAuthor }: AuthorD
                 {sparklesElement}
                 
                 {/* Card Main Header Area */}
-                <div className="flex gap-3 items-start text-left">
+                <div className="flex gap-4 items-start text-left">
                   <img
                     src={author.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80'}
                     alt={author.username}
                     className={ringClass}
                   />
                   <div className="space-y-1.5 min-w-0 flex-grow">
-                    <div className="flex flex-wrap items-center gap-1.5">
+                    <div className="flex flex-wrap items-center gap-2">
                       <h4 className={nameClass}>{author.username}</h4>
                       {roleBadge}
                     </div>
@@ -245,7 +245,7 @@ export default function AuthorDirectory({ currentUser, onSelectAuthor }: AuthorD
                 </div>
 
                 {/* Update Plan or Bios section */}
-                <div className="my-4 pt-3.5 border-t border-gray-150/10 min-h-[44px] text-left">
+                <div className="my-5 pt-4 border-t border-gray-150/10 min-h-[44px] text-left">
                   <p className={`text-[11px] leading-relaxed line-clamp-2 ${
                     isOwner ? 'text-purple-200/70' : 'text-gray-500'
                   }`}>
@@ -260,7 +260,7 @@ export default function AuthorDirectory({ currentUser, onSelectAuthor }: AuthorD
                 </div>
 
                 {/* Footer Buttons CTA */}
-                <div className="pt-2">
+                <div className="pt-3">
                   <button
                     onClick={() => onSelectAuthor(author.firebaseUid)}
                     className={`w-full py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1 ${
