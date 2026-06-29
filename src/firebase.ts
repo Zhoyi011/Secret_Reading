@@ -5,15 +5,16 @@ import firebaseConfigDefault from '../firebase-applet-config.json';
 
 // Support custom configuration via VITE_ environment variables with fallback to user's custom project keys
 const env = (import.meta as any).env || {};
+const defaultConfig = firebaseConfigDefault as any;
 const customConfig = {
-  apiKey: env.VITE_FIREBASE_API_KEY || firebaseConfigDefault.apiKey || "AIzaSyDt-JP_yIy2amy_SJjpV7RawDf8yR9wLmw",
-  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfigDefault.authDomain || "secret-reading.firebaseapp.com",
-  projectId: env.VITE_FIREBASE_PROJECT_ID || firebaseConfigDefault.projectId || "secret-reading",
-  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || firebaseConfigDefault.storageBucket || "secret-reading.firebasestorage.app",
-  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseConfigDefault.messagingSenderId || "1071172219377",
-  appId: env.VITE_FIREBASE_APP_ID || firebaseConfigDefault.appId || "1:1071172219377:web:7998d9fb76bbb9303f1450",
-  measurementId: env.VITE_FIREBASE_MEASUREMENT_ID || firebaseConfigDefault.measurementId || "G-ZTVQP3G9YX",
-  firestoreDatabaseId: env.VITE_FIREBASE_DATABASE_ID || firebaseConfigDefault.firestoreDatabaseId || "(default)"
+  apiKey: env.VITE_FIREBASE_API_KEY || defaultConfig.apiKey || "AIzaSyDt-JP_yIy2amy_SJjpV7RawDf8yR9wLmw",
+  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || defaultConfig.authDomain || "secret-reading.firebaseapp.com",
+  projectId: env.VITE_FIREBASE_PROJECT_ID || defaultConfig.projectId || "secret-reading",
+  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || defaultConfig.storageBucket || "secret-reading.firebasestorage.app",
+  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || defaultConfig.messagingSenderId || "1071172219377",
+  appId: env.VITE_FIREBASE_APP_ID || defaultConfig.appId || "1:1071172219377:web:7998d9fb76bbb9303f1450",
+  measurementId: env.VITE_FIREBASE_MEASUREMENT_ID || defaultConfig.measurementId || "G-ZTVQP3G9YX",
+  firestoreDatabaseId: env.VITE_FIREBASE_DATABASE_ID || defaultConfig.firestoreDatabaseId || "(default)"
 };
 
 const app = initializeApp(customConfig);

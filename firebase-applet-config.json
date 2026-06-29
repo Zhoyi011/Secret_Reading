@@ -1,10 +1,9 @@
 {
   "projectId": "secret-reading",
-  "appId": "1:1071172219377:web:7998d9fb76bbb9303f1450",
+  "appId": "1:1071172219377:web:56e6057374e679923f1450",
   "apiKey": "AIzaSyDt-JP_yIy2amy_SJjpV7RawDf8yR9wLmw",
   "authDomain": "secret-reading.firebaseapp.com",
-  "firestoreDatabaseId": "(default)",
   "storageBucket": "secret-reading.firebasestorage.app",
   "messagingSenderId": "1071172219377",
-  "measurementId": "G-ZTVQP3G9YX"
+  "measurementId": ""
 }

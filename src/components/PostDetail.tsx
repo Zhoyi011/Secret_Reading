@@ -4,8 +4,10 @@ import { db, handleFirestoreError, OperationType } from '../firebase';
 import { Post, AppUser, Bookmark, Comment, CommentReply, ShortReview, AuthorQuestion } from '../types';
 import MarkdownRenderer from './MarkdownRenderer';
 import SeriesDirectory from './SeriesDirectory';
-import { ArrowLeft, Heart, Calendar, User, Trash2, Edit, Loader2, Sparkles, AlertTriangle, CheckCircle, X, Copy, UserPlus, UserCheck, MessageSquare, Bookmark as BookmarkIcon, Check, AlertCircle, ChevronDown, Download, Star, BookOpen } from 'lucide-react';
+import { ArrowLeft, Heart, Calendar, User, Trash2, Edit, Loader2, Sparkles, AlertTriangle, CheckCircle, X, Copy, UserPlus, UserCheck, MessageSquare, Bookmark as BookmarkIcon, Check, AlertCircle, ChevronDown, Download, Star, BookOpen, Wifi, WifiOff, Smartphone, Cloud } from 'lucide-react';
 import ImageWrapper from './ImageWrapper';
+import { safeLocalStorage } from '../utils/safeStorage';
+import { getDriveAccessToken, connectGoogleDrive, searchOrCreateFolder, backupPostToDrive } from '../utils/googleDrive';
 
 interface PostDetailProps {
   postId: string;
@@ -35,6 +37,89 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
 
   const [scrollProgress, setScrollProgress] = useState(0);
 
+  const [isOfflineSaved, setIsOfflineSaved] = useState(false);
+  const [backingUpToDrive, setBackingUpToDrive] = useState(false);
+  const [showDriveAuthModal, setShowDriveAuthModal] = useState(false);
+  const [isOnline, setIsOnline] = useState(() => typeof navigator !== 'undefined' ? navigator.onLine : true);
+
+  // Monitor network status
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Check if post is saved for offline
+  useEffect(() => {
+    if (!postId) return;
+    const offlineListStr = safeLocalStorage.getItem('offline_saved_posts');
+    if (offlineListStr) {
+      try {
+        const list = JSON.parse(offlineListStr) as any[];
+        setIsOfflineSaved(list.some(p => p.id === postId));
+      } catch (e) {
+        console.warn("Failed to parse offline list:", e);
+      }
+    } else {
+      setIsOfflineSaved(false);
+    }
+  }, [postId]);
+
+  const handleToggleOfflineSave = () => {
+    if (!post) return;
+    try {
+      const offlineListStr = safeLocalStorage.getItem('offline_saved_posts');
+      let list: any[] = [];
+      if (offlineListStr) {
+        list = JSON.parse(offlineListStr);
+      }
+      
+      if (isOfflineSaved) {
+        const updatedList = list.filter(p => p.id !== post.id);
+        safeLocalStorage.setItem('offline_saved_posts', JSON.stringify(updatedList));
+        safeLocalStorage.removeItem(`offline_post_${post.id}`);
+        setIsOfflineSaved(false);
+        setToastMessage({
+          type: 'success',
+          text: '已成功移除该文章的离线缓存。'
+        });
+      } else {
+        if (!list.some(p => p.id === post.id)) {
+          list.push({
+            id: post.id,
+            title: post.title,
+            authorName: post.authorName,
+            coverImage: post.coverImage || post.images?.[0] || '',
+            isR18: post.isR18 || false,
+            shortId: post.shortId || '',
+            createdAt: post.createdAt,
+            savedAt: new Date().toISOString()
+          });
+        }
+        safeLocalStorage.setItem('offline_saved_posts', JSON.stringify(list));
+        safeLocalStorage.setItem(`offline_post_${post.id}`, JSON.stringify(post));
+        setIsOfflineSaved(true);
+        setToastMessage({
+          type: 'success',
+          text: '文章已妥善缓存，您可以在「离线模式」下随时畅读！'
+        });
+      }
+      setTimeout(() => setToastMessage(null), 3000);
+    } catch (e) {
+      console.error("Failed to toggle offline save:", e);
+      setToastMessage({
+        type: 'error',
+        text: '保存至离线阅读失败，请检查浏览器存储空间。'
+      });
+      setTimeout(() => setToastMessage(null), 3000);
+    }
+  };
+
   const handleDownloadMarkdown = () => {
     if (!post) return;
     const element = document.createElement("a");
@@ -44,6 +129,49 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
     document.body.appendChild(element);
     element.click();
     document.body.removeChild(element);
+  };
+
+  const handleBackupToDrive = async (forceAuthPopup = false) => {
+    if (!post || backingUpToDrive) return;
+    
+    if (!isOnline) {
+      setToastMessage({
+        type: 'error',
+        text: '您当前处于离线状态，无法使用 Google Drive 备份，请连接网络后重试。'
+      });
+      setTimeout(() => setToastMessage(null), 3000);
+      return;
+    }
+
+    let token = getDriveAccessToken();
+    
+    if (!token || forceAuthPopup) {
+      setShowDriveAuthModal(true);
+      return;
+    }
+
+    setBackingUpToDrive(true);
+    try {
+      const folderId = await searchOrCreateFolder(token);
+      await backupPostToDrive(token, post, folderId);
+      setToastMessage({
+        type: 'success',
+        text: `🎉 成功备份至 Google Drive！已保存在您的「私密阅读专栏备份」文件夹中。`
+      });
+    } catch (err: any) {
+      console.error('Drive backup failed:', err);
+      if (err?.message?.includes('授权失效') || err?.status === 401) {
+        setShowDriveAuthModal(true);
+      } else {
+        setToastMessage({
+          type: 'error',
+          text: `备份失败: ${err.message || err}`
+        });
+      }
+    } finally {
+      setBackingUpToDrive(false);
+      setTimeout(() => setToastMessage(null), 4000);
+    }
   };
 
   const [recommending, setRecommending] = useState(false);
@@ -222,11 +350,12 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
             updateDoc(postRef, { shortId: currentShortId }).catch(err => console.warn("Failed to update shortId:", err));
             loadedData.shortId = currentShortId;
           }
-          setPost({
+          const fullPost: Post = {
             id: postSnap.id,
             ...loadedData,
             shortId: currentShortId,
-          });
+          };
+          setPost(fullPost);
 
           if (loadedData.isR18) {
             setShowR18Warning(true);
@@ -238,11 +367,54 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
           // Increment views count in firestore (non-blocking)
           const updatedViews = (loadedData.views || 0) + 1;
           updateDoc(postRef, { views: updatedViews }).catch(err => console.warn("Failed to update views count:", err));
+
+          // Auto-update offline cache if it was already marked for offline
+          const offlineListStr = safeLocalStorage.getItem('offline_saved_posts');
+          if (offlineListStr) {
+            try {
+              const list = JSON.parse(offlineListStr) as any[];
+              if (list.some(p => p.id === postId)) {
+                safeLocalStorage.setItem(`offline_post_${postId}`, JSON.stringify(fullPost));
+              }
+            } catch (e) {
+              console.warn("Error parsing offline list for auto-cache update", e);
+            }
+          }
         } else {
           console.error("No such article post available");
+          // Try to load from offline cache as fallback!
+          const cached = safeLocalStorage.getItem(`offline_post_${postId}`);
+          if (cached) {
+            try {
+              const parsed = JSON.parse(cached) as Post;
+              setPost(parsed);
+              if (parsed.isR18) {
+                setShowR18Warning(true);
+              }
+              setToastMessage({ type: 'success', text: '您当前处于离线状态，已为您加载本地缓存版本。' });
+              setTimeout(() => setToastMessage(null), 4000);
+            } catch (e) {
+              console.error("Failed to parse cached post:", e);
+            }
+          }
         }
       } catch (err) {
         console.error("Failed to load post detail:", err);
+        // Try to load from offline cache as fallback!
+        const cached = safeLocalStorage.getItem(`offline_post_${postId}`);
+        if (cached) {
+          try {
+            const parsed = JSON.parse(cached) as Post;
+            setPost(parsed);
+            if (parsed.isR18) {
+              setShowR18Warning(true);
+            }
+            setToastMessage({ type: 'success', text: '网络连接受限，已为您加载已下载的离线版本。' });
+            setTimeout(() => setToastMessage(null), 4000);
+          } catch (e) {
+            console.error("Failed to parse cached post on error fallback:", e);
+          }
+        }
       } finally {
         setLoading(false);
       }
@@ -456,6 +628,11 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
   // Helper functions for short reviews and questions
   const handleSubmitReview = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isOnline) {
+      setToastMessage({ type: 'error', text: '您当前处于离线模式，无法提交短评，请连接网络后重试。' });
+      setTimeout(() => setToastMessage(null), 3000);
+      return;
+    }
     if (!user || !postId || !newReview.trim() || reviewSubmitting) return;
     setReviewSubmitting(true);
     try {
@@ -479,6 +656,11 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
   };
 
   const handleToggleFeatureReview = async (reviewId: string, currentFeatured: boolean) => {
+    if (!isOnline) {
+      setToastMessage({ type: 'error', text: '您当前处于离线模式，无法管理精选。' });
+      setTimeout(() => setToastMessage(null), 3000);
+      return;
+    }
     if (!user || !post || user.firebaseUid !== post.authorId) return;
     try {
       const reviewRef = doc(db, 'short_reviews', reviewId);
@@ -491,6 +673,11 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
 
   const handleAskQuestion = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isOnline) {
+      setToastMessage({ type: 'error', text: '您当前处于离线模式，无法向作者提问。' });
+      setTimeout(() => setToastMessage(null), 3000);
+      return;
+    }
     if (!user || !postId || !newQuestion.trim() || questionSubmitting) return;
     setQuestionSubmitting(true);
     try {
@@ -634,7 +821,7 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
 
   const handleCopyLink = async () => {
     if (!post) return;
-    const shareUrl = `${window.location.origin}/${encodeURIComponent(post.authorName)}/${post.shortId || ''}`;
+    const shareUrl = `https://secret-reading.vercel.app/${encodeURIComponent(post.authorName)}/${post.shortId || ''}`;
     try {
       if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
         await navigator.clipboard.writeText(shareUrl);
@@ -838,6 +1025,11 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
 
   const handleSubmitComment = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isOnline) {
+      setToastMessage({ type: 'error', text: '您当前处于离线模式，无法发表评论。' });
+      setTimeout(() => setToastMessage(null), 3000);
+      return;
+    }
     if (!user || !post || !newCommentText.trim()) return;
 
     if (user.isMuted) {
@@ -1043,6 +1235,28 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
               <BookOpen className="h-3.5 w-3.5 text-indigo-500" />
               <span>沉浸模式</span>
             </button>
+
+            <button
+              onClick={handleToggleOfflineSave}
+              className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all text-xs font-bold shadow-sm cursor-pointer ${
+                isOfflineSaved
+                  ? 'bg-emerald-50 border-emerald-150 text-emerald-700 hover:bg-emerald-100'
+                  : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+              }`}
+              title={isOfflineSaved ? '已保存离线缓存，点击可取消' : '保存该文至本地，无网环境下亦可畅读'}
+            >
+              {isOfflineSaved ? (
+                <>
+                  <Smartphone className="h-3.5 w-3.5 text-emerald-600" />
+                  <span>已存离线</span>
+                </>
+              ) : (
+                <>
+                  <Smartphone className="h-3.5 w-3.5 text-gray-400" />
+                  <span>离线保存</span>
+                </>
+              )}
+            </button>
           </div>
 
           {user && (isAuthor || isAdminOrOwner) && (
@@ -1077,6 +1291,20 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
                     <span className="sm:hidden">导出</span>
                   </button>
                   <button
+                    disabled={backingUpToDrive}
+                    onClick={() => handleBackupToDrive()}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-indigo-600 border border-indigo-500 text-white hover:bg-indigo-700 transition-all text-xs font-semibold cursor-pointer disabled:opacity-60"
+                    title="安全备份此博文内容至您的 Google Drive 账户"
+                  >
+                    {backingUpToDrive ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Cloud className="h-3.5 w-3.5" />
+                    )}
+                    <span className="hidden sm:inline">Drive 云备份</span>
+                    <span className="sm:hidden">云备份</span>
+                  </button>
+                  <button
                     onClick={() => onEditPost(post.id)}
                     className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-600 hover:bg-indigo-100 transition-all text-xs font-semibold"
                     title="编辑文章"
@@ -1106,6 +1334,12 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
 
       {/* Main post container */}
       <article className="bg-white rounded-3xl border border-gray-100 shadow-sm p-6 sm:p-10 space-y-6">
+        {!isOnline && (
+          <div className="flex items-start gap-2.5 p-3.5 bg-amber-50/75 rounded-2xl border border-amber-100 text-amber-800 text-xs font-semibold leading-relaxed mb-4">
+            <WifiOff className="h-4 w-4 text-amber-600 animate-pulse shrink-0 mt-0.5" />
+            <span>您目前处于离线模式。当前展示的是本地安全缓存的离线版本。部分动态评论/提问推荐板块将暂停提交，直到网络恢复。</span>
+          </div>
+        )}
         <div className="space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
             <h1 className="font-display font-bold text-gray-950 text-2xl sm:text-3.5xl tracking-tight leading-snug flex-grow flex items-center gap-2 flex-wrap">
@@ -2208,6 +2442,62 @@ export default function PostDetail({ postId, user, onNavigate, onEditPost, onBac
             <BookOpen className="h-3.5 w-3.5" />
             <span>退出沉浸</span>
           </button>
+        </div>
+      )}
+      {/* Google Drive Authorization & Backup Modal */}
+      {showDriveAuthModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-md w-full border border-gray-100 shadow-xl space-y-6 text-left">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl">
+                <Cloud className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">连接您的 Google Drive</h3>
+                <p className="text-xs text-gray-400 font-medium">安全备份您的文学创作</p>
+              </div>
+            </div>
+            <p className="text-xs sm:text-sm text-gray-600 leading-relaxed font-medium">
+              备份需要您授权连接自己的 Google 账户。应用将在您的云端硬盘中自动创建一个专属的 <span className="font-bold text-gray-900">「私密阅读专栏备份」</span> 文件夹，并将该作品以格式精美的 Markdown 文本文件安全备份。
+            </p>
+            <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 text-[11px] text-amber-800 leading-normal font-semibold">
+              🔒 安全保障：本系统仅申请 <code className="bg-amber-100/60 px-1 py-0.5 rounded font-mono">drive.file</code> 最小功能权限，意味着系统只能对由其自身创建的文件拥有管理权限，绝对无法访问或修改您在云端硬盘中的其他任何私人文件。
+            </div>
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => setShowDriveAuthModal(false)}
+                className="flex-1 py-2.5 px-4 bg-gray-50 hover:bg-gray-100 text-gray-700 font-bold rounded-xl text-xs transition-all border border-gray-100 cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                onClick={async () => {
+                  setShowDriveAuthModal(false);
+                  setBackingUpToDrive(true);
+                  try {
+                    const token = await connectGoogleDrive();
+                    const folderId = await searchOrCreateFolder(token);
+                    await backupPostToDrive(token, post!, folderId);
+                    setToastMessage({
+                      type: 'success',
+                      text: '🎉 Google Drive 授权并备份成功！已安全存于您的云端。'
+                    });
+                  } catch (err: any) {
+                    setToastMessage({
+                      type: 'error',
+                      text: `连接并备份失败: ${err.message || err}`
+                    });
+                  } finally {
+                    setBackingUpToDrive(false);
+                    setTimeout(() => setToastMessage(null), 4000);
+                  }
+                }}
+                className="flex-1 py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs transition-all shadow-sm shadow-indigo-600/15 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                {backingUpToDrive ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : '授权并备份'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { collection, query, where, getDocs, onSnapshot, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { AppUser } from '../types';
-import { Bookmark, BookOpen, Trash2, ArrowLeft, Loader2, Heart, Calendar, Clock, AlertTriangle, X } from 'lucide-react';
+import { Bookmark, BookOpen, Trash2, ArrowLeft, Loader2, Heart, Calendar, Clock, AlertTriangle, X, Smartphone } from 'lucide-react';
 import ImageWrapper from './ImageWrapper';
+import { safeLocalStorage } from '../utils/safeStorage';
 
 interface BookshelfProps {
   user: AppUser | null;
@@ -37,15 +38,53 @@ interface HistoryItem {
 export default function Bookshelf({ user, onNavigate, onSelectPost }: BookshelfProps) {
   const [bookmarks, setBookmarks] = useState<BookmarkItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'all' | 'want' | 'reading' | 'read' | 'history'>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'want' | 'reading' | 'read' | 'history' | 'offline'>('all');
   const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [offlinePosts, setOfflinePosts] = useState<any[]>([]);
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
     title: string;
     message: string;
     onConfirm: () => void;
   } | null>(null);
+
+  // Load offline saved posts from local storage
+  useEffect(() => {
+    const offlineListStr = safeLocalStorage.getItem('offline_saved_posts');
+    if (offlineListStr) {
+      try {
+        setOfflinePosts(JSON.parse(offlineListStr));
+      } catch (e) {
+        console.warn("Failed to parse offline posts list:", e);
+      }
+    }
+  }, []);
+
+  const removeOfflinePost = (postId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setConfirmDialog({
+      isOpen: true,
+      title: '删除本地离线缓存',
+      message: '确定要删除这篇文章的本地离线缓存吗？删除后您在离线状态下将无法阅读。',
+      onConfirm: () => {
+        try {
+          const offlineListStr = safeLocalStorage.getItem('offline_saved_posts');
+          if (offlineListStr) {
+            const list = JSON.parse(offlineListStr) as any[];
+            const updatedList = list.filter(p => p.id !== postId);
+            safeLocalStorage.setItem('offline_saved_posts', JSON.stringify(updatedList));
+            safeLocalStorage.removeItem(`offline_post_${postId}`);
+            setOfflinePosts(updatedList);
+          }
+        } catch (err) {
+          console.error("Failed to remove offline cached post:", err);
+        }
+        setConfirmDialog(null);
+      }
+    });
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -216,10 +255,84 @@ export default function Bookshelf({ user, onNavigate, onSelectPost }: BookshelfP
           <Clock className="h-3.5 w-3.5 shrink-0" />
           <span>阅读历史 ({historyItems.length})</span>
         </button>
+        <button
+          onClick={() => setActiveTab('offline')}
+          className={`flex-1 min-w-[80px] py-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1 ${
+            activeTab === 'offline'
+              ? 'bg-indigo-600 text-white shadow-sm'
+              : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'
+          }`}
+        >
+          <Smartphone className="h-3.5 w-3.5 shrink-0" />
+          <span>离线缓存 ({offlinePosts.length})</span>
+        </button>
       </div>
 
       {/* Content */}
-      {activeTab === 'history' ? (
+      {activeTab === 'offline' ? (
+        offlinePosts.length === 0 ? (
+          <div className="text-center py-16 bg-white rounded-2xl border border-gray-100 shadow-sm">
+            <Smartphone className="h-10 w-10 text-gray-300 mx-auto mb-3 animate-pulse" />
+            <h3 className="text-sm font-bold text-gray-800 font-display">暂无离线下载内容</h3>
+            <p className="text-xs text-gray-400 mt-2 max-w-sm mx-auto leading-relaxed">
+              您还没有离线缓存过任何文章。您可以在任意文章的顶部点击“离线保存”，系统将妥善在本地打包，保证在没有网络连接时也可以流畅畅读。
+            </p>
+            <button
+              onClick={() => onNavigate('home')}
+              className="mt-5 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition-all shadow-sm cursor-pointer"
+            >
+              去浏览推荐文章
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 text-left">
+            {offlinePosts.map((item) => (
+              <div
+                key={item.id}
+                onClick={() => onSelectPost(item.id)}
+                className="group bg-white rounded-2xl border border-gray-100 p-4 shadow-3xs hover:shadow-2xs transition-all duration-300 flex flex-col justify-between cursor-pointer relative overflow-hidden"
+              >
+                <div className="space-y-3.5">
+                  <div className="aspect-video rounded-xl overflow-hidden border border-gray-100 bg-gray-50 relative shrink-0">
+                    <ImageWrapper
+                      src={item.coverImage}
+                      alt={item.title}
+                      width={400}
+                      className="w-full h-full object-cover transition-transform group-hover:scale-102"
+                      placeholderClassName="w-full h-full"
+                    />
+                    <span className="absolute top-2 left-2 text-[9px] font-bold px-2 py-0.5 rounded-full shadow-2xs text-white bg-emerald-600/95 backdrop-blur-xs flex items-center gap-1">
+                      <Smartphone className="h-2.5 w-2.5" />
+                      <span>本地已缓存</span>
+                    </span>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <h3 className="font-bold text-gray-900 line-clamp-1 group-hover:text-indigo-600 transition-colors text-sm font-display">
+                      {item.title}
+                    </h3>
+                    <div className="flex items-center justify-between text-[10px] text-gray-400">
+                      <span>作者：{item.authorName}</span>
+                      <span className="font-mono text-emerald-600">离线阅读就绪</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 pt-3.5 border-t border-gray-50 flex items-center justify-between text-[10px] text-gray-400">
+                  <span>保存于 {item.savedAt ? new Date(item.savedAt).toLocaleDateString() : '近期'}</span>
+                  <button
+                    onClick={(e) => removeOfflinePost(item.id, e)}
+                    title="删除本地缓存"
+                    className="p-1.5 text-gray-400 hover:text-rose-600 rounded hover:bg-rose-50 transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+      ) : activeTab === 'history' ? (
         historyLoading ? (
           <div className="flex flex-col items-center justify-center py-24 bg-white border border-gray-100 rounded-2xl shadow-3xs">
             <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />

@@ -16,12 +16,20 @@ import Bookshelf from './components/Bookshelf';
 import Messages from './components/Messages';
 import AuthorProfile from './components/AuthorProfile';
 import CustomerService from './components/CustomerService';
+import DownloadAndroidModal from './components/DownloadAndroidModal';
 import { motion, AnimatePresence } from 'motion/react';
-import { BookOpen, User, Shield, Compass, LogOut, Settings as SettingsIcon, Loader2, Bell, BellRing, Heart, UserPlus, Check, Trash2, Bookmark, MessageSquare, ShieldAlert, Menu, X, PenTool, Headphones } from 'lucide-react';
+import { BookOpen, User, Shield, Compass, LogOut, Settings as SettingsIcon, Loader2, Bell, BellRing, Heart, UserPlus, Check, Trash2, Bookmark, MessageSquare, ShieldAlert, Menu, X, PenTool, Headphones, Smartphone, Wifi, WifiOff } from 'lucide-react';
 import { safeLocalStorage, safeSessionStorage } from './utils/safeStorage';
 
 export default function App() {
-  const [user, setUser] = useState<AppUser | null>(null);
+  const [user, setUser] = useState<AppUser | null>(() => {
+    try {
+      const stored = safeLocalStorage.getItem('secret_reading_offline_user');
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      return null;
+    }
+  });
   const [firebaseUser, setFirebaseUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(false);
@@ -36,6 +44,62 @@ export default function App() {
 
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
+  
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showDownloadModal, setShowDownloadModal] = useState(false);
+  const [showFloatBanner, setShowFloatBanner] = useState(false);
+  const [isOnline, setIsOnline] = useState(() => typeof navigator !== 'undefined' ? navigator.onLine : true);
+
+  // Monitor network connection status for premium offline layout updates
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Sync user state changes to local storage for offline retrieval
+  useEffect(() => {
+    if (user) {
+      safeLocalStorage.setItem('secret_reading_offline_user', JSON.stringify(user));
+    } else {
+      safeLocalStorage.removeItem('secret_reading_offline_user');
+    }
+  }, [user]);
+
+  // Catch Android PWA installation prompt
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      // Automatically show the install float widget when the browser triggers the beforeinstallprompt event
+      const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
+      const isDismissed = safeLocalStorage.getItem('secret_pwa_dismissed') === 'true';
+      if (!isStandalone && !isDismissed) {
+        setShowFloatBanner(true);
+      }
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  // Delay trigger float banner if not already installed as a standalone app, and has not been dismissed
+  useEffect(() => {
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
+    const isDismissed = safeLocalStorage.getItem('secret_pwa_dismissed') === 'true';
+    if (!isStandalone && !isDismissed && !showFloatBanner) {
+      const timer = setTimeout(() => {
+        setShowFloatBanner(true);
+      }, 5000); // Wait 5 seconds after loading
+      return () => clearTimeout(timer);
+    }
+  }, [showFloatBanner]);
 
   useEffect(() => {
     if (route !== 'post-detail') {
@@ -520,7 +584,7 @@ export default function App() {
                   </li>
                   <li>
                     <strong className="text-gray-800">核对 Authorized Domains (授权域名)：</strong><br />
-                    在 Firebase Console ➔ <strong>Authentication</strong> ➔ <strong>Settings</strong> ➔ <strong>Authorized domains</strong> 下，确保将当前所在的域名 <span className="font-mono bg-zinc-100 px-1 py-0.5 rounded text-zinc-800 font-bold">{window.location.hostname}</span> 与 <span className="font-mono bg-zinc-100 px-1 py-0.5 rounded text-zinc-800 font-bold">ais-pre-qv6cbjsvnatdqixps5cced-1001959589862.asia-southeast1.run.app</span> 添加进去。
+                    在 Firebase Console ➔ <strong>Authentication</strong> ➔ <strong>Settings</strong> ➔ <strong>Authorized domains</strong> 下，确保将当前所在的域名 <span className="font-mono bg-zinc-100 px-1 py-0.5 rounded text-zinc-800 font-bold">{window.location.hostname}</span> 与 <span className="font-mono bg-zinc-100 px-1 py-0.5 rounded text-zinc-800 font-bold">secret-reading.vercel.app</span> 添加进去。
                   </li>
                 </ol>
               </div>
@@ -708,11 +772,24 @@ export default function App() {
               <div className="h-9 w-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold tracking-wider shadow-sm shadow-indigo-600/20 group-hover:scale-105 transition-transform">
                 秘
               </div>
-              <div>
-                <span className="block font-display font-extrabold text-sm text-gray-900 tracking-tight leading-none">
-                  私密阅读
-                </span>
-                <span className="block font-sans text-[10px] text-gray-400 font-bold mt-1 uppercase tracking-wider">
+              <div className="flex flex-col">
+                <div className="flex items-center gap-1.5">
+                  <span className="block font-display font-extrabold text-sm text-gray-900 tracking-tight leading-none">
+                    私密阅读
+                  </span>
+                  {isOnline ? (
+                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[8px] font-extrabold bg-emerald-50 text-emerald-600 border border-emerald-100/60 leading-none shadow-3xs" title="离线可用：所有页面和已读作品都已自动缓存">
+                      <Wifi className="h-2.5 w-2.5" />
+                      <span>已缓存</span>
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[8px] font-extrabold bg-amber-50 text-amber-600 border border-amber-150/50 leading-none shadow-3xs animate-pulse" title="您当前处于离线模式，仍可访问本地书架与已缓存作品">
+                      <WifiOff className="h-2.5 w-2.5" />
+                      <span>离线模式</span>
+                    </span>
+                  )}
+                </div>
+                <span className="block font-sans text-[10px] text-gray-400 font-bold mt-1 uppercase tracking-wider leading-none">
                   PREMIUM READING
                 </span>
               </div>
@@ -753,6 +830,14 @@ export default function App() {
               >
                 <Headphones className="h-4 w-4" />
                 <span>智能客服</span>
+              </button>
+
+              <button
+                onClick={() => setShowDownloadModal(true)}
+                className="hidden md:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all bg-emerald-50 text-emerald-700 hover:bg-emerald-100/85 border border-emerald-200/50 cursor-pointer shadow-3xs"
+              >
+                <Smartphone className="h-3.5 w-3.5 text-emerald-650 animate-pulse" />
+                <span>下載 Android App 📱</span>
               </button>
 
               {user.role === 'owner' && (
@@ -809,7 +894,7 @@ export default function App() {
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: 10, scale: 0.95 }}
                         transition={{ duration: 0.15 }}
-                        className="absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-2xl border border-gray-150/70 shadow-xl z-50 overflow-hidden flex flex-col max-h-[480px]"
+                        className="absolute -right-12 sm:right-0 mt-2 w-[85vw] sm:w-96 bg-white rounded-2xl border border-gray-150/70 shadow-xl z-50 overflow-hidden flex flex-col max-h-[480px]"
                       >
                         {/* Header */}
                         <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-zinc-50/50">
@@ -988,9 +1073,22 @@ export default function App() {
                     <div className="h-8 w-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-sm">
                       秘
                     </div>
-                    <span className="font-display font-extrabold text-sm text-gray-900">
-                      功能导航
-                    </span>
+                    <div className="flex flex-col">
+                      <span className="font-display font-extrabold text-sm text-gray-900 leading-none">
+                        功能导航
+                      </span>
+                      {isOnline ? (
+                        <span className="inline-flex items-center gap-0.5 mt-1 text-[8px] font-black text-emerald-600">
+                          <Wifi className="h-2.5 w-2.5" />
+                          <span>已缓存离线可用</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-0.5 mt-1 text-[8px] font-black text-amber-600 animate-pulse">
+                          <WifiOff className="h-2.5 w-2.5" />
+                          <span>离线阅读模式</span>
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <button
                     onClick={() => setIsMobileMenuOpen(false)}
@@ -1035,6 +1133,14 @@ export default function App() {
                   >
                     <Headphones className="h-4.5 w-4.5" />
                     <span>智能客服</span>
+                  </button>
+
+                  <button
+                    onClick={() => { setShowDownloadModal(true); setIsMobileMenuOpen(false); }}
+                    className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all bg-emerald-50 text-emerald-700 hover:bg-emerald-100/80 cursor-pointer border border-emerald-100"
+                  >
+                    <Smartphone className="h-4.5 w-4.5 text-emerald-650 animate-pulse" />
+                    <span>下載 Android App 📱</span>
                   </button>
 
                   {user.role === 'owner' && (
@@ -1177,6 +1283,62 @@ export default function App() {
               </div>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      <DownloadAndroidModal
+        isOpen={showDownloadModal}
+        onClose={() => setShowDownloadModal(false)}
+        deferredPrompt={deferredPrompt}
+      />
+
+      {/* Premium Floating 'Install to Desktop' Widget */}
+      <AnimatePresence>
+        {showFloatBanner && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.8, y: 50 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.8, y: 50 }}
+            transition={{ type: 'spring', damping: 15, stiffness: 120 }}
+            className="fixed bottom-6 right-6 z-40 max-w-sm bg-zinc-950/95 hover:bg-zinc-900 border border-indigo-500/30 text-white rounded-2xl p-4 shadow-[0_12px_40px_rgba(79,70,229,0.25)] backdrop-blur-md flex items-center justify-between gap-3.5"
+          >
+            <div 
+              onClick={() => setShowDownloadModal(true)}
+              className="flex items-center gap-3 cursor-pointer select-none flex-1 group"
+            >
+              <div className="p-2 bg-indigo-500/10 rounded-xl text-indigo-400 group-hover:scale-110 transition-transform">
+                <Smartphone className="h-5 w-5 animate-pulse" />
+              </div>
+              <div className="text-left">
+                <h4 className="text-[11px] font-extrabold text-zinc-100 flex items-center gap-1">
+                  <span>安装绿色桌面端 (PWA)</span>
+                  <span className="text-[8px] bg-emerald-500/15 text-emerald-400 px-1.5 py-0.5 rounded-full font-extrabold">安全无毒</span>
+                </h4>
+                <p className="text-[9px] text-zinc-400 font-medium mt-0.5 leading-snug">
+                  一键添加到手机主屏幕，全屏流畅运行 ＆ 100% 免除系统拦截误报
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowDownloadModal(true)}
+                className="px-2.5 py-1.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-750 text-white text-[10px] font-bold rounded-lg cursor-pointer transition-colors whitespace-nowrap"
+              >
+                立即安装
+              </button>
+              <button
+                onClick={() => {
+                  safeLocalStorage.setItem('secret_pwa_dismissed', 'true');
+                  setShowFloatBanner(false);
+                }}
+                className="p-1.5 hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 rounded-lg cursor-pointer transition-colors"
+                title="不再提示"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

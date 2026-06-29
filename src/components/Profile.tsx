@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { collection, query, where, getDocs, onSnapshot, setDoc, doc, addDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { AppUser, Post, Follow, AuthorApplication } from '../types';
-import { User, Calendar, BookOpen, Clock, Edit2, Shield, Heart, HeartOff, PenTool, Users, X, Loader2, Sparkles } from 'lucide-react';
+import { User, Calendar, BookOpen, Clock, Edit2, Shield, Heart, HeartOff, PenTool, Users, X, Loader2, Sparkles, Cloud, CheckCircle, AlertCircle, Smartphone, Bell, Settings } from 'lucide-react';
 import ImageWrapper from './ImageWrapper';
+import { getDriveAccessToken, connectGoogleDrive, searchOrCreateFolder, backupPostToDrive } from '../utils/googleDrive';
 
 interface ProfileProps {
   user: AppUser | null;
@@ -23,6 +24,27 @@ export default function Profile({ user, onNavigate, onSelectPost, onEditPost, on
   const [profilesMap, setProfilesMap] = useState<Record<string, { username: string; avatar: string }>>({});
   const [showFollowersModal, setShowFollowersModal] = useState(false);
   const [showFollowingModal, setShowFollowingModal] = useState(false);
+
+  // Google Drive Backup integration states
+  const [driveToken, setDriveToken] = useState<string | null>(getDriveAccessToken());
+  const [backingUpAll, setBackingUpAll] = useState(false);
+  const [backupIndex, setBackupIndex] = useState(0);
+  const [backupMessage, setBackupMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Native Android & PWA Notification states
+  const [notifPermission, setNotifPermission] = useState<string>(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      return window.Notification.permission;
+    }
+    return 'unsupported';
+  });
+  const [testNotifDelay, setTestNotifDelay] = useState<string>('5000');
+  const [isTestingNotif, setIsTestingNotif] = useState(false);
+  const [testNotifCountdown, setTestNotifCountdown] = useState<number>(0);
+
+  useEffect(() => {
+    setDriveToken(getDriveAccessToken());
+  }, []);
 
   // Author application states
   const [application, setApplication] = useState<AuthorApplication | null>(null);
@@ -128,6 +150,160 @@ export default function Profile({ user, onNavigate, onSelectPost, onEditPost, on
 
     return () => unsubscribe();
   }, [user]);
+
+  const handleConnectDrive = async () => {
+    try {
+      const token = await connectGoogleDrive();
+      setDriveToken(token);
+      setBackupMessage({
+        type: 'success',
+        text: '🎉 Google Drive 授权连接成功！已获取云端备份许可。'
+      });
+      setTimeout(() => setBackupMessage(null), 3000);
+    } catch (err: any) {
+      setBackupMessage({
+        type: 'error',
+        text: `授权连接失败: ${err.message || err}`
+      });
+      setTimeout(() => setBackupMessage(null), 4500);
+    }
+  };
+
+  const handleDisconnectDrive = () => {
+    const confirmDisc = window.confirm("确定要断开 Google Drive 连接吗？下次备份时需要重新授权。");
+    if (confirmDisc) {
+      import('../utils/googleDrive').then((module) => {
+        module.setDriveAccessToken(null);
+        setDriveToken(null);
+        setBackupMessage({
+          type: 'success',
+          text: '已成功断开 Google Drive 连接。'
+        });
+        setTimeout(() => setBackupMessage(null), 3000);
+      });
+    }
+  };
+
+  const handleBackupAll = async () => {
+    if (!driveToken || myPosts.length === 0 || backingUpAll) return;
+    
+    setBackingUpAll(true);
+    setBackupIndex(0);
+    try {
+      const folderId = await searchOrCreateFolder(driveToken);
+      
+      for (let i = 0; i < myPosts.length; i++) {
+        setBackupIndex(i + 1);
+        await backupPostToDrive(driveToken, myPosts[i], folderId);
+      }
+      
+      setBackupMessage({
+        type: 'success',
+        text: `🎉 全盘备份成功！共备份了 ${myPosts.length} 篇作品至 Google Drive 专属备份文件夹！`
+      });
+    } catch (err: any) {
+      console.error("Batch backup failed:", err);
+      if (err?.message?.includes('授权失效') || err?.status === 401) {
+        setDriveToken(null);
+        setBackupMessage({
+          type: 'error',
+          text: 'Google Drive 授权已失效，请重新连接后重试。'
+        });
+      } else {
+        setBackupMessage({
+          type: 'error',
+          text: `全盘备份失败: ${err.message || err}`
+        });
+      }
+    } finally {
+      setBackingUpAll(false);
+      setTimeout(() => setBackupMessage(null), 5000);
+    }
+  };
+
+  const handleRequestNotifPermission = async () => {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      setBackupMessage({
+        type: 'error',
+        text: '您的浏览器或设备环境暂不支持原生的 System Notification。'
+      });
+      setTimeout(() => setBackupMessage(null), 3000);
+      return;
+    }
+
+    try {
+      const permission = await window.Notification.requestPermission();
+      setNotifPermission(permission);
+      if (permission === 'granted') {
+        setBackupMessage({
+          type: 'success',
+          text: '🎉 原生通知通道授权成功！应用已可在手机系统状态栏发送消息。'
+        });
+      } else if (permission === 'denied') {
+        setBackupMessage({
+          type: 'error',
+          text: '系统通知权限已被禁用。请在安卓的「应用设置 -> 权限/通知管理」中手动开启。'
+        });
+      }
+      setTimeout(() => setBackupMessage(null), 3000);
+    } catch (err: any) {
+      console.error('Request permission failed:', err);
+    }
+  };
+
+  const handleTriggerTestNotification = () => {
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) {
+      alert('未检测到运行中的 Service Worker，请在移动浏览器环境直接运行此 PWA 应用。');
+      return;
+    }
+
+    if (notifPermission !== 'granted') {
+      alert('请先点击下方的「激活系统通知权限」授予通知授权。');
+      return;
+    }
+
+    const delayMs = parseInt(testNotifDelay, 10);
+    setIsTestingNotif(true);
+
+    if (delayMs > 0) {
+      setTestNotifCountdown(delayMs / 1000);
+      const interval = setInterval(() => {
+        setTestNotifCountdown((prev) => {
+          if (prev <= 1) {
+            clearInterval(interval);
+            setIsTestingNotif(false);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    } else {
+      setIsTestingNotif(false);
+    }
+
+    // Trigger message dispatch to Service Worker
+    navigator.serviceWorker.ready.then((reg) => {
+      if (reg.active) {
+        reg.active.postMessage({
+          type: 'TRIGGER_TEST_NOTIFICATION',
+          payload: {
+            title: '🔔 您的私密阅读专栏 • 系统消息',
+            body: delayMs > 0
+              ? `🚀 延时推送诊断成功！这证明即使您锁屏或退至后台，系统级通知也运作完美！`
+              : `🌟 即时通知测试成功！系统级通知通道已全线打通。`,
+            delay: delayMs,
+            url: '/'
+          }
+        });
+      } else {
+        alert('Service Worker 激活中，请稍后刷新重试。');
+        setIsTestingNotif(false);
+      }
+    }).catch((err) => {
+      console.error('Ready sw registration error:', err);
+      setIsTestingNotif(false);
+    });
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -493,6 +669,257 @@ export default function Profile({ user, onNavigate, onSelectPost, onEditPost, on
           )}
         </div>
       )}
+
+      {/* Google Drive Backup Panel for Authors/Owners */}
+      {(user.role === 'author' || user.role === 'owner') && (
+        <div className="bg-gradient-to-r from-indigo-50/20 via-white to-blue-50/10 rounded-3xl border border-gray-150 p-6 space-y-4 shadow-3xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="p-3 bg-indigo-50/85 text-indigo-600 rounded-2xl shrink-0">
+                <Cloud className="h-6 w-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="font-display font-bold text-gray-900 text-base flex items-center gap-2">
+                  <span>Google Drive 自动备份管理</span>
+                  {driveToken ? (
+                    <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 text-[10px] font-black px-2 py-0.5 rounded-full border border-emerald-100">
+                      ● 已授权连接
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 bg-gray-50 text-gray-400 text-[10px] font-bold px-2 py-0.5 rounded-full border border-gray-100">
+                      未连接
+                    </span>
+                  )}
+                </h3>
+                <p className="text-xs text-gray-500 font-medium leading-relaxed max-w-2xl font-sans">
+                  作为创作者，您可以轻松连接您的个人 Google Drive 云盘。一键安全备份全站所有个人的作品草稿和发布稿件为精美的 Markdown 格式，防止任何本地及设备故障导致内容丢失。
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2.5 sm:self-center shrink-0">
+              {!driveToken ? (
+                <button
+                  type="button"
+                  onClick={handleConnectDrive}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Cloud className="h-4 w-4" />
+                  连接 Google Drive
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    disabled={backingUpAll || myPosts.length === 0}
+                    onClick={handleBackupAll}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-sm transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    {backingUpAll ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>正在备份 ({backupIndex}/{myPosts.length})...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Cloud className="h-4 w-4" />
+                        <span>一键备份全部作品 ({myPosts.length}篇)</span>
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={backingUpAll}
+                    onClick={handleDisconnectDrive}
+                    className="px-3 py-2 border border-gray-200 hover:border-gray-300 bg-white text-gray-500 hover:text-gray-700 rounded-xl text-xs font-bold transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    断开连接
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {backupMessage && (
+            <div className={`p-4 rounded-2xl flex items-start gap-2.5 text-xs font-semibold leading-normal ${
+              backupMessage.type === 'success' 
+                ? 'bg-emerald-50 border border-emerald-100/60 text-emerald-800' 
+                : 'bg-rose-50 border border-rose-100/60 text-rose-800'
+            }`}>
+              {backupMessage.type === 'success' ? (
+                <CheckCircle className="h-4 w-4 shrink-0 text-emerald-600 mt-0.5" />
+              ) : (
+                <AlertCircle className="h-4 w-4 shrink-0 text-rose-600 mt-0.5" />
+              )}
+              <span>{backupMessage.text}</span>
+            </div>
+          )}
+
+          {backingUpAll && (
+            <div className="space-y-1.5 bg-indigo-50/30 p-4 rounded-2xl border border-indigo-100/30">
+              <div className="flex justify-between items-center text-[10px] text-indigo-700 font-extrabold uppercase font-mono">
+                <span>云端同步进度 (Google Drive Backup Status)</span>
+                <span>{Math.round((backupIndex / myPosts.length) * 100)}%</span>
+              </div>
+              <div className="w-full bg-indigo-100/50 h-2.5 rounded-full overflow-hidden">
+                <div 
+                  className="bg-indigo-600 h-full rounded-full transition-all duration-300"
+                  style={{ width: `${(backupIndex / myPosts.length) * 100}%` }}
+                />
+              </div>
+              <p className="text-[10px] text-gray-400 font-medium">
+                正在上传: 「{myPosts[backupIndex - 1]?.title}」... 请勿关闭页面。
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* PWA 绿色客户端桌面安装与系统级通知中心 */}
+      <div className="bg-gradient-to-r from-zinc-50 via-white to-indigo-50/5 rounded-3xl border border-gray-150 p-6 space-y-6 shadow-3xs">
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className="p-3 bg-indigo-50/80 text-indigo-600 rounded-2xl shrink-0">
+              <Smartphone className="h-6 w-6" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="font-display font-bold text-gray-900 text-base flex items-center gap-2">
+                <span>PWA 绿色桌面端极速安装与通知中心</span>
+                <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 text-[10px] font-black px-2 py-0.5 rounded-full border border-indigo-100 animate-pulse">
+                  绿色纯净无毒
+                </span>
+              </h3>
+              <p className="text-xs text-gray-500 font-medium leading-relaxed max-w-2xl font-sans">
+                本应用已完全适配谷歌 ＆ 苹果 PWA (Progressive Web App) 标准，支持直接将本应用一键添加至您的手机主屏幕。添加后它将像普通 APP 一样独立全屏运行，并享有系统级通知权限。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* System permission display and activation buttons */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Permission Card */}
+          <div className="p-4 bg-white rounded-2xl border border-gray-100 space-y-3.5 shadow-3xs">
+            <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider font-mono flex items-center gap-1.5">
+              <Settings className="h-3.5 w-3.5 text-indigo-500" />
+              <span>通知权限与通道状态</span>
+            </h4>
+            
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-gray-500 font-semibold">Android 系统通道状态：</span>
+              {notifPermission === 'granted' ? (
+                <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 text-xs font-bold px-2.5 py-1 rounded-lg border border-emerald-100">
+                  🟢 运行中（已授权）
+                </span>
+              ) : notifPermission === 'denied' ? (
+                <span className="inline-flex items-center gap-1 bg-rose-50 text-rose-700 text-xs font-bold px-2.5 py-1 rounded-lg border border-rose-100">
+                  🔴 已禁用（拒绝接收）
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 text-xs font-bold px-2.5 py-1 rounded-lg border border-amber-100">
+                  🟡 待激活（默认）
+                </span>
+              )}
+            </div>
+
+            <p className="text-[11px] text-gray-400 font-medium leading-relaxed">
+              {notifPermission === 'granted' 
+                ? '恭喜，通知通道已完全打开！您可以在安卓设备的「应用通知管理」中看到本应用，并在此处精细化调整该通知通道是否静音、是否震动、是否置顶等。' 
+                : '如果已安装应用后仍然收不到通知，请长按您的桌面的“私密阅读”图标 -> 应用信息 -> 通知管理 -> 开启所有通知选项开关。'}
+            </p>
+
+            {notifPermission !== 'granted' && (
+              <button
+                type="button"
+                onClick={handleRequestNotifPermission}
+                className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Bell className="h-4 w-4" />
+                立即激活原生系统通知权限
+              </button>
+            )}
+          </div>
+
+          {/* Diagnostic Test Card */}
+          <div className="p-4 bg-white rounded-2xl border border-gray-100 space-y-3.5 shadow-3xs flex flex-col justify-between">
+            <div className="space-y-3">
+              <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider font-mono flex items-center gap-1.5">
+                <Bell className="h-3.5 w-3.5 text-indigo-500" />
+                <span>原生系统级通知诊断（测试）</span>
+              </h4>
+              
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs text-gray-500 font-semibold shrink-0">发送延时：</span>
+                <select
+                  value={testNotifDelay}
+                  onChange={(e) => setTestNotifDelay(e.target.value)}
+                  disabled={isTestingNotif}
+                  className="bg-gray-50 border border-gray-200 text-gray-800 font-bold py-1 px-2.5 rounded-lg text-xs outline-hidden focus:border-indigo-500"
+                >
+                  <option value="0">⚡️ 立即发送通知</option>
+                  <option value="5000">⏳ 延时 5 秒发送（推荐锁屏测试）</option>
+                </select>
+              </div>
+
+              <p className="text-[11px] text-gray-400 font-medium leading-relaxed">
+                {testNotifDelay === '5000' 
+                  ? '💡 点击测试按钮后，建议立即将您的安卓设备完全锁屏，或按下 Home 键返回桌面。5 秒后系统将直接在您手机顶部推送高优先级横幅通知，证明后台进程接通！' 
+                  : '💡 点击测试按钮后，应用会在系统通知栏立即推送一条消息，这不需要依赖复杂的第三方消息队列。'}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              disabled={isTestingNotif || notifPermission !== 'granted'}
+              onClick={handleTriggerTestNotification}
+              className="w-full py-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:bg-gray-50 disabled:text-gray-400 border border-indigo-100/30 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              {isTestingNotif ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin text-indigo-600" />
+                  <span>{testNotifCountdown > 0 ? `将在 ${testNotifCountdown} 秒后发送...` : '正在推送...'}</span>
+                </>
+              ) : (
+                <>
+                  <Bell className="h-4 w-4" />
+                  <span>发送测试系统通知</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Mobile Installation Guide */}
+        <div className="p-4.5 bg-indigo-50/20 border border-indigo-100/30 rounded-2xl space-y-3.5">
+          <h4 className="text-xs font-bold text-indigo-900 flex items-center gap-1.5">
+            <Smartphone className="h-4 w-4" />
+            <span>📲 「免下载 PWA 桌面独立版」极速安装与防误报说明（兼容 5.0 - 13.0+ 安卓 ＆ 苹果）</span>
+          </h4>
+          <div className="text-[11px] text-indigo-950 font-semibold bg-white/70 p-3 rounded-xl border border-indigo-100 space-y-1.5 leading-relaxed">
+            <p className="text-indigo-800">🔒 为什么推荐安装「PWA 桌面独立版」而不是打包普通 APK？</p>
+            <ul className="list-disc pl-4 space-y-1 text-gray-600 font-medium">
+              <li><strong className="text-indigo-700">100% 绿色安全，免遭误报：</strong> 现代安卓系统（特别是华为/小米/OPPO等）对未上架应用商店、无昂贵企业证书的个人自建 APK 进行极为严苛甚至武断的“风险软件/不安全软件”拦截和警告。PWA 运行于浏览器沙箱内，<strong className="text-emerald-600">绝对不会触发任何手机病毒或风险提示</strong>。</li>
+              <li><strong className="text-indigo-700">完美原生体验：</strong> 安装后会在手机桌面生成独立精美图标，以全屏沉浸、无浏览器网址栏的模式独立运行。它像普通 APK 一样拥有独立的任务切换窗口，支持离线加载与系统通知推送！</li>
+              <li><strong className="text-indigo-700">极致轻量，不占内存：</strong> 相比动辄几十MB的安装包，PWA 仅占用不到 1MB，且启动极速。</li>
+            </ul>
+          </div>
+          <ol className="text-[11px] text-gray-600 leading-relaxed font-semibold space-y-1.5 list-decimal pl-4.5">
+            <li>
+              使用您安卓手机上的系统自带浏览器或推荐的 <span className="text-indigo-600 font-bold">Chrome 浏览器</span> 打开本站（即当前的 Shared App URL）。
+            </li>
+            <li>
+              点击浏览器右上角或底部的菜单选项（如 Chrome 的 <span className="font-bold text-gray-800">「⋮」</span>），在弹出的菜单中选择 <span className="text-indigo-600 font-bold">「安装应用」</span>（部分浏览器可能显示为「添加到主屏幕」或「添加至桌面」）。
+            </li>
+            <li>
+              手机系统会自动为您在主屏幕上创建该应用的精美图标。此时，它已经转化为一个 <span className="text-indigo-650 font-bold">无需传统下载的、系统级独立的专栏应用</span>！
+            </li>
+            <li>
+              <span className="font-bold text-gray-950">关于通知与通道权限：</span>
+              首次启动或点击上方的“激活权限”按钮时，请允许通知授权。随后，您随时可以长按桌面应用图标选择 <span className="font-bold text-gray-800">「应用信息」-「通知管理」</span>，根据个人喜好开启或调整通知横幅、锁屏显示等选项。
+            </li>
+          </ol>
+        </div>
+      </div>
 
       {/* Articles summary list */}
       <div className="space-y-4">
