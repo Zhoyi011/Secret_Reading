@@ -1,8 +1,9 @@
-const CACHE_NAME = 'secret-reading-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
-  '/manifest.json'
+  '/manifest.json',
+  '/icon-192.png',
+  '/icon-512.png'
 ];
 
 // Install Event - Pre-cache essential static shell
