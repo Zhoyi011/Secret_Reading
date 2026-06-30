@@ -20,6 +20,9 @@ export default function DownloadAndroidModal({ isOpen, onClose, deferredPrompt }
   const [activeTab, setActiveTab] = useState<BrowserTab>('chrome');
   const [copied, setCopied] = useState(false);
   const [isPromptAvailable, setIsPromptAvailable] = useState(false);
+  const [isSwActive, setIsSwActive] = useState(false);
+  const [isHttpsActive, setIsHttpsActive] = useState(false);
+  const [isIframeDetected, setIsIframeDetected] = useState(false);
 
   useEffect(() => {
     if (deferredPrompt) {
@@ -28,6 +31,21 @@ export default function DownloadAndroidModal({ isOpen, onClose, deferredPrompt }
       setIsPromptAvailable(false);
     }
   }, [deferredPrompt, isOpen]);
+
+  useEffect(() => {
+    if (isOpen) {
+      setIsHttpsActive(window.location.protocol === 'https:');
+      setIsIframeDetected(window.self !== window.top);
+      if ('serviceWorker' in navigator) {
+        setIsSwActive(!!navigator.serviceWorker.controller);
+        navigator.serviceWorker.getRegistrations().then(regs => {
+          if (regs.length > 0) {
+            setIsSwActive(true);
+          }
+        }).catch(err => console.log('Error querying service workers:', err));
+      }
+    }
+  }, [isOpen]);
 
   // Copy app link to clipboard helper
   const copyToClipboard = () => {
@@ -164,6 +182,94 @@ export default function DownloadAndroidModal({ isOpen, onClose, deferredPrompt }
                   </p>
                 </div>
               )}
+
+              {/* PWA Diagnostic Panel */}
+              <div className="p-4 bg-zinc-950/40 border-b border-zinc-800/80 text-left">
+                <div className="flex items-center justify-between mb-2.5">
+                  <span className="text-[10px] font-extrabold tracking-wide uppercase text-indigo-400 font-mono flex items-center gap-1">
+                    <Sparkles className="h-3 w-3 text-indigo-400" />
+                    <span>✦ PWA 运行就绪诊断报告 (Diagnostics)</span>
+                  </span>
+                  <span className="text-[9px] text-zinc-500 font-mono">
+                    符合 Chrome / Safari PWA 标准
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div className="p-2.5 bg-zinc-900/60 border border-zinc-800/60 rounded-xl flex flex-col justify-between">
+                    <span className="text-[9px] text-zinc-500">HTTPS 安全连接</span>
+                    <div className="flex items-center gap-1.5 mt-1">
+                      {isHttpsActive ? (
+                        <>
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                          <span className="text-[10px] font-bold text-zinc-200">安全合规</span>
+                        </>
+                      ) : (
+                        <>
+                          <AlertTriangle className="h-3.5 w-3.5 text-rose-400" />
+                          <span className="text-[10px] font-bold text-rose-400">非 HTTPS</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 bg-zinc-900/60 border border-zinc-800/60 rounded-xl flex flex-col justify-between">
+                    <span className="text-[9px] text-zinc-500">离线缓存引擎</span>
+                    <div className="flex items-center gap-1.5 mt-1">
+                      {isSwActive ? (
+                        <>
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                          <span className="text-[10px] font-bold text-zinc-200">运行正常</span>
+                        </>
+                      ) : (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 text-indigo-400 animate-spin" />
+                          <span className="text-[10px] font-bold text-indigo-400">正在激活</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 bg-zinc-900/60 border border-zinc-800/60 rounded-xl flex flex-col justify-between">
+                    <span className="text-[9px] text-zinc-500">预览沙盒检测</span>
+                    <div className="flex items-center gap-1.5 mt-1">
+                      {isIframeDetected ? (
+                        <>
+                          <AlertCircle className="h-3.5 w-3.5 text-amber-400" />
+                          <span className="text-[10px] font-bold text-amber-400">iframe 限制</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                          <span className="text-[10px] font-bold text-zinc-200">独立环境</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 bg-zinc-900/60 border border-zinc-800/60 rounded-xl flex flex-col justify-between">
+                    <span className="text-[9px] text-zinc-500">一键安装就绪</span>
+                    <div className="flex items-center gap-1.5 mt-1">
+                      {isPromptAvailable ? (
+                        <>
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                          <span className="text-[10px] font-bold text-zinc-200">完全就绪</span>
+                        </>
+                      ) : (
+                        <>
+                          <Info className="h-3.5 w-3.5 text-zinc-500" />
+                          <span className="text-[10px] font-bold text-zinc-400">手动添加</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {isIframeDetected && (
+                  <div className="mt-2.5 p-2.5 bg-amber-500/5 rounded-xl border border-amber-500/10 text-[9.5px] text-amber-300 leading-normal font-medium">
+                    💡 <strong>如何解除沙盒限制：</strong> 您当前是在 AI Studio 预览框 (iframe) 内使用。浏览器出于安全机制，会彻底锁定所有 iframe 页面的一键 PWA 安装。请点击预览框右上角的<strong>「在新窗口打开 / 新标签页打开 (Open in new tab)」</strong>以全屏加载应用，即可 100% 触发原生“添加至主屏幕”！
+                  </div>
+                )}
+              </div>
 
               {/* Multi-Browser Switch Tabs */}
               <div className="flex border-b border-zinc-800 bg-zinc-950/20 px-2 pt-2 gap-1 overflow-x-auto">
