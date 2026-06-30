@@ -1,3 +1,4 @@
+const CACHE_NAME = 'secret-reading-v3';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
